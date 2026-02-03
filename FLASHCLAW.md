@@ -144,7 +144,9 @@ export default plugin;
 interface ToolContext {
   chatId: string;        // 当前聊天 ID
   groupId: string;       // 群组文件夹名（同 groupFolder）
-  sendMessage: (content: string) => Promise<void>;  // 发送消息到当前聊天
+  userId: string;        // 用户 ID（用于用户级别记忆）
+  isMain: boolean;       // 是否为主群组
+  sendMessage: (chatId: string, content: string) => Promise<void>;  // 发送消息
 }
 ```
 
@@ -174,6 +176,52 @@ const plugin: ToolPlugin = {
     
     await context.sendMessage(chatId, text);
     return `已发送消息到 ${chatId}`;
+  }
+};
+```
+
+### 示例：记忆工具（支持用户级别）
+
+```typescript
+const plugin: ToolPlugin = {
+  name: 'memory',
+  description: '长期记忆（remember/recall）',
+  schema: {
+    name: 'memory',
+    description: '记住或回忆信息',
+    input_schema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['remember', 'recall'] },
+        key: { type: 'string', description: '记忆键' },
+        value: { type: 'string', description: '记忆值（remember 时必需）' },
+        scope: { 
+          type: 'string', 
+          enum: ['user', 'group'],
+          description: 'user=用户级别（跨会话），group=会话级别'
+        }
+      },
+      required: ['action']
+    }
+  },
+  
+  async execute(params, context) {
+    const { action, key, value, scope = 'user' } = params;
+    const mm = getMemoryManager();
+    
+    if (action === 'remember') {
+      // scope='user' 时记忆跨所有会话共享
+      if (scope === 'user') {
+        mm.rememberUser(context.userId, key, value);
+      } else {
+        mm.remember(context.groupId, key, value);
+      }
+      return `已记住：${key}`;
+    }
+    
+    // recall 时优先返回用户级别记忆
+    const userMemory = mm.recallUser(context.userId, key);
+    return userMemory || mm.recall(context.groupId, key);
   }
 };
 ```

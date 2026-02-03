@@ -8,6 +8,7 @@
 - [Agent Runner API](#agent-runner-api)
 - [数据库 API](#数据库-api)
 - [消息队列 API](#消息队列-api)
+- [记忆管理器](#记忆管理器)
 - [AI API 客户端](#ai-api-客户端)
 - [模型能力检测](#模型能力检测)
 
@@ -70,7 +71,9 @@ interface ToolResult {
 interface ToolContext {
   chatId: string;        // 当前聊天 ID
   groupId: string;       // 群组文件夹名
-  sendMessage: (content: string) => Promise<void>;  // 发送消息到当前聊天
+  userId: string;        // 用户 ID（用于用户级别记忆）
+  isMain: boolean;       // 是否为主群组
+  sendMessage: (chatId: string, content: string) => Promise<void>;  // 发送消息
 }
 ```
 
@@ -451,6 +454,53 @@ interface QueuedMessage<T> {
 - **队列隔离**：每个聊天有独立队列，互不影响
 - **自动重试**：处理失败会自动重试
 - **超时保护**：单条消息处理超时会被跳过
+
+---
+
+## 记忆管理器
+
+### MemoryManager 类
+
+```typescript
+// src/core/memory.ts
+
+// 获取全局单例
+import { getMemoryManager } from './core/memory.js';
+const mm = getMemoryManager();
+```
+
+### 用户级别记忆（跨会话共享）
+
+```typescript
+// 记住用户信息（所有会话共享）
+mm.rememberUser(userId: string, key: string, value: string): void
+
+// 回忆用户信息
+mm.recallUser(userId: string, key?: string): string | Record<string, string> | null
+
+// 遗忘用户信息
+mm.forgetUser(userId: string, key?: string): boolean
+```
+
+### 会话级别记忆
+
+```typescript
+// 记住会话信息（仅当前会话）
+mm.remember(groupId: string, key: string, value: string): void
+
+// 回忆会话信息
+mm.recall(groupId: string, key?: string): string | Record<string, string> | null
+
+// 遗忘会话信息
+mm.forget(groupId: string, key?: string): boolean
+```
+
+### 存储位置
+
+| 类型 | 路径 |
+|------|------|
+| 用户记忆 | `data/memory/users/{userId}.md` |
+| 会话记忆 | `data/memory/{groupId}.md` |
 
 ---
 
