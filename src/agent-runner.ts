@@ -22,6 +22,8 @@ import { RegisteredGroup } from './types.js';
 import { ApiClient, ChatMessage, ToolSchema, createApiClient, TextBlock, ImageBlock } from './core/api-client.js';
 import { currentModelSupportsVision, getCurrentModelId } from './core/model-capabilities.js';
 import { MemoryManager, createMemoryManager } from './core/memory.js';
+import { pluginManager } from './plugins/manager.js';
+import { ToolContext, ToolResult as PluginToolResult } from './plugins/types.js';
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -100,7 +102,30 @@ function writeIpcFile(dir: string, data: object): string {
 }
 
 /**
- * 内置工具定义
+ * 获取所有可用工具（插件工具 + 内置后备工具）
+ * 插件工具优先，内置工具作为后备
+ */
+export function getAllTools(): ToolSchema[] {
+  // 获取插件工具
+  const pluginTools = pluginManager.getActiveTools();
+  const pluginToolNames = new Set(pluginTools.map(t => t.name));
+  
+  // 获取内置工具（作为后备）
+  const builtinTools = getBuiltinTools();
+  
+  // 合并：插件工具 + 不在插件中的内置工具
+  const combinedTools = [...pluginTools];
+  for (const tool of builtinTools) {
+    if (!pluginToolNames.has(tool.name)) {
+      combinedTools.push(tool);
+    }
+  }
+  
+  return combinedTools;
+}
+
+/**
+ * 内置工具定义（后备，优先使用插件）
  * 这些工具用于消息发送和任务调度
  */
 export function getBuiltinTools(): ToolSchema[] {
@@ -273,6 +298,7 @@ The folder name should be lowercase with hyphens (e.g., "family-chat").`,
 
 /**
  * 创建工具执行器
+ * 优先使用插件工具，插件不存在则使用内置实现
  */
 export function createToolExecutor(ctx: IpcContext, memoryManager: MemoryManager) {
   const { chatJid, groupFolder, isMain } = ctx;
@@ -280,9 +306,50 @@ export function createToolExecutor(ctx: IpcContext, memoryManager: MemoryManager
   const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
   const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 
+  // 构建插件工具上下文
+  const pluginContext: ToolContext = {
+    chatId: chatJid,
+    groupId: groupFolder,
+    sendMessage: async (content: string) => {
+      // 通过 IPC 发送消息到当前聊天
+      const data = {
+        type: 'message',
+        chatJid,
+        text: content,
+        groupFolder,
+        timestamp: new Date().toISOString()
+      };
+      writeIpcFile(MESSAGES_DIR, data);
+    }
+  };
+
   return async (name: string, params: unknown): Promise<ToolResult> => {
     const args = params as Record<string, unknown>;
 
+    // 优先尝试使用插件工具
+    const plugin = pluginManager.getTool(name);
+    if (plugin) {
+      try {
+        const result = await plugin.execute(params, pluginContext);
+        if (result.success) {
+          return { 
+            content: typeof result.data === 'string' 
+              ? result.data 
+              : JSON.stringify(result.data, null, 2) 
+          };
+        } else {
+          return { content: result.error || 'Plugin execution failed', isError: true };
+        }
+      } catch (err) {
+        logger.error({ tool: name, err }, 'Plugin tool execution failed');
+        return { 
+          content: `Plugin error: ${err instanceof Error ? err.message : String(err)}`, 
+          isError: true 
+        };
+      }
+    }
+
+    // 内置工具后备实现
     switch (name) {
       case 'send_message': {
         const data = {
@@ -753,8 +820,8 @@ async function runAgentOnce(
   // 获取系统提示词
   const systemPrompt = getGroupSystemPrompt(group, input.isMain, input.isScheduledTask);
 
-  // 获取工具定义
-  const tools = getBuiltinTools();
+  // 获取工具定义（插件工具 + 内置后备工具）
+  const tools = getAllTools();
 
   // 创建超时 Promise
   const timeoutPromise = new Promise<AgentOutput>((resolve) => {

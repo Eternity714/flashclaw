@@ -1,0 +1,7 @@
+{
+  "name": "memory",
+  "version": "1.0.0",
+  "type": "tool",
+  "description": "长期记忆管理（remember/recall）",
+  "main": "index.ts"
+}

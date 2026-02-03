@@ -1,0 +1,7 @@
+{
+  "name": "register_group",
+  "version": "1.0.0",
+  "type": "tool",
+  "description": "注册新的聊天群组",
+  "main": "index.ts"
+}
