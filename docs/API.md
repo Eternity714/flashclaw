@@ -308,15 +308,91 @@ function resumeTask(taskId: string): void;
 interface ScheduledTask {
   id: string;
   group_folder: string;
+  chat_jid: string;
   prompt: string;
   schedule_type: 'cron' | 'interval' | 'once';
   schedule_value: string;
+  context_mode: 'group' | 'isolated';
   status: 'active' | 'paused' | 'completed';
-  next_run: string;        // ISO 时间戳
+  next_run: string | null;        // ISO 时间戳
   last_run: string | null;
   last_result: string | null;
   created_at: string;
+  
+  // 重试和超时配置
+  retry_count: number;            // 当前重试次数
+  max_retries: number;            // 最大重试次数（默认 3）
+  timeout_ms?: number;            // 任务执行超时时间（毫秒，默认 300000）
 }
+```
+
+### 任务调度新增函数
+
+```typescript
+// 获取下一个将要执行的任务时间（用于精确定时器）
+function getNextWakeTime(): number | null;
+
+// 获取所有活跃任务
+function getActiveTasks(): ScheduledTask[];
+
+// 更新任务重试信息
+function updateTaskRetry(taskId: string, retryCount: number, nextRun: string | null): void;
+
+// 重置任务重试计数（成功执行后调用）
+function resetTaskRetry(taskId: string): void;
+```
+
+---
+
+## 任务调度器 API
+
+任务调度器负责定时任务的执行，采用精确定时器机制。
+
+### 调度器函数
+
+```typescript
+// src/task-scheduler.ts
+
+// 启动调度器
+function startScheduler(deps: SchedulerDependencies): void;
+
+// 停止调度器
+function stopScheduler(): void;
+
+// 立即唤醒调度器（用于创建新任务后立即检查）
+function wake(): void;
+
+// 获取调度器状态
+function getSchedulerStatus(): {
+  running: boolean;
+  nextWakeTime: number | null;
+  activeTasks: number;
+};
+
+interface SchedulerDependencies {
+  sendMessage: (jid: string, text: string) => Promise<void>;
+  registeredGroups: () => Record<string, RegisteredGroup>;
+  getSessions: () => Record<string, string>;
+}
+```
+
+### 调度器特性
+
+| 特性 | 说明 |
+|------|------|
+| **精确定时器** | 按需唤醒，而非固定轮询，计算精确的下次执行时间 |
+| **并发控制** | 最多同时执行 3 个任务（可配置） |
+| **超时保护** | 默认 5 分钟超时，防止任务卡死阻塞调度 |
+| **自动重试** | 失败任务自动重试，使用指数退避策略 |
+
+### 重试机制
+
+```typescript
+// 重试延迟计算（指数退避）
+const retryDelay = Math.min(
+  RETRY_BASE_DELAY_MS * Math.pow(2, retryCount - 1),  // 1分钟 * 2^n
+  MAX_RETRY_DELAY_MS                                    // 最大 1 小时
+);
 ```
 
 ---

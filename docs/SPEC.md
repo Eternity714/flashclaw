@@ -173,8 +173,13 @@ flashclaw/
 ```typescript
 export const BOT_NAME = process.env.BOT_NAME || 'FlashClaw';
 export const TIMEZONE = process.env.TIMEZONE || 'Asia/Shanghai';
-export const SCHEDULER_POLL_INTERVAL = 60000;  // 1 分钟
 export const AGENT_TIMEOUT = parseInt(process.env.AGENT_TIMEOUT || '300000', 10);
+
+// 任务调度器配置（精确定时器，不再使用轮询）
+export const MAX_CONCURRENT_TASKS = 3;              // 最大并发任务数
+export const DEFAULT_TASK_TIMEOUT_MS = 300000;      // 默认任务超时（5分钟）
+export const RETRY_BASE_DELAY_MS = 60000;           // 重试基础延迟（1分钟）
+export const MAX_RETRY_DELAY_MS = 3600000;          // 最大重试延迟（1小时）
 
 const PROJECT_ROOT = process.cwd();
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
@@ -357,29 +362,59 @@ FlashClaw 有一个内置调度器，在群组上下文中作为完整代理运�
 
 | 工具 | 说明 |
 |------|------|
-| `schedule_task` | 创建定时任务 |
+| `schedule_task` | 创建定时任务（支持 maxRetries、timeoutMs 参数） |
 | `list_tasks` | 列出所有任务 |
 | `cancel_task` | 取消任务 |
+
+### 调度器特性
+
+| 特性 | 说明 |
+|------|------|
+| **精确定时器** | 按需唤醒，计算精确的下次执行时间，不再固定轮询 |
+| **并发控制** | 最多同时执行 3 个任务，使用 p-limit 控制 |
+| **超时保护** | 默认 5 分钟超时，可通过 timeoutMs 参数配置 |
+| **自动重试** | 失败任务自动重试，指数退避策略（1分钟→2分钟→4分钟...） |
 
 ### 任务执行流程
 
 ```
-1. 调度器每分钟检查待执行任务
+1. 精确定时器在任务到期时唤醒
    │
    ▼
-2. 获取 next_run <= 当前时间的任务
+2. 获取所有到期任务（next_run <= 当前时间）
    │
    ▼
-3. 在任务的群组上下文中运行 AI Agent
+3. 使用并发池执行任务（最多 3 个并发）
+   │
+   ├── 超时保护：每个任务有独立超时时间
    │
    ▼
-4. Agent 执行任务，可能调用 send_message 发送结果
+4. 在任务的群组上下文中运行 AI Agent
    │
    ▼
-5. 更新任务状态和下次执行时间
+5. 执行结果处理：
+   ├── 成功：重置重试计数，计算下次执行时间
+   └── 失败：检查重试次数
+       ├── 未达上限：指数退避后重试
+       └── 已达上限：标记失败，恢复正常调度
    │
    ▼
-6. 记录执行日志
+6. 记录执行日志，重新计算定时器
+```
+
+### 重试机制
+
+```typescript
+// 指数退避计算
+retryDelay = min(
+  RETRY_BASE_DELAY_MS * 2^(retryCount - 1),  // 1分钟 * 2^n
+  MAX_RETRY_DELAY_MS                           // 最大 1 小时
+)
+
+// 示例：
+// 第1次重试：1 分钟后
+// 第2次重试：2 分钟后
+// 第3次重试：4 分钟后（达到默认上限，任务失败）
 ```
 
 ---
