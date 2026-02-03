@@ -38,22 +38,26 @@ flashclaw start -d
 
 | 命令 | 说明 |
 |------|------|
-| `flashclaw init` | 交互式初始化配置 |
+| `flashclaw` | 启动服务（默认） |
 | `flashclaw start` | 启动服务 |
-| `flashclaw start -d` | 后台守护进程启动 |
-| `flashclaw stop` | 停止服务 |
-| `flashclaw restart` | 重启服务 |
-| `flashclaw status` | 查看运行状态 |
-| `flashclaw plugins list` | 列出所有插件 |
-| `flashclaw plugins enable <name>` | 启用插件 |
-| `flashclaw plugins disable <name>` | 禁用插件 |
-| `flashclaw plugins reload` | 热重载插件 |
-| `flashclaw config list` | 列出所有配置 |
-| `flashclaw config get <key>` | 获取配置值 |
-| `flashclaw config set <key> <value>` | 设置配置值 |
-| `flashclaw config delete <key>` | 删除配置项 |
-| `flashclaw logs` | 查看日志 |
-| `flashclaw logs -f` | 实时日志跟踪 |
+| `flashclaw version` | 显示版本 |
+| `flashclaw help` | 显示帮助 |
+| `flashclaw plugins list` | 列出已安装插件 |
+| `flashclaw plugins list --available` | 列出可安装插件 |
+| `flashclaw plugins install <name>` | 安装插件 |
+| `flashclaw plugins uninstall <name>` | 卸载插件 |
+| `flashclaw plugins update <name>` | 更新插件 |
+| `flashclaw plugins update --all` | 更新所有插件 |
+
+**安装插件示例：**
+
+```bash
+# 从官方仓库安装
+flashclaw plugins install web-fetch
+
+# 从 GitHub 直接安装
+flashclaw plugins install GuLu9527/flashclaw-plugin-browser
+```
 
 ## 插件系统
 
@@ -171,6 +175,25 @@ flashclaw/
 - **私聊**：直接回复，无需触发词
 - **群聊**：@机器人 触发响应
 - **自动注册**：新会话自动注册，无需手动配置
+
+### 聊天命令
+
+在对话中使用斜杠命令快速操作：
+
+| 命令 | 说明 |
+|------|------|
+| `/help` | 显示帮助信息 |
+| `/status` | 查看会话状态和 Token 用量 |
+| `/new` | 重置当前会话 |
+| `/compact` | 压缩上下文（生成摘要） |
+| `/tasks` | 查看定时任务 |
+| `/ping` | 测试机器人响应 |
+
+**上下文管理：**
+- 系统会实时统计 Token 使用量
+- 达到 70% (140k tokens) 时自动提示
+- 使用 `/compact` 可手动压缩，保留摘要继续对话
+- 使用 `/new` 完全重置会话
 
 ### 多模态支持
 

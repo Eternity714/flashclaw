@@ -1,0 +1,11 @@
+{
+  "name": "hello-world",
+  "version": "1.0.0",
+  "description": "测试插件 - Hello World",
+  "type": "tool",
+  "main": "index.ts",
+  "author": "GuLu9527",
+  "license": "MIT",
+  "minFlashClawVersion": "1.0.0",
+  "tags": ["测试", "示例"]
+}

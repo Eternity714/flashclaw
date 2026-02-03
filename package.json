@@ -4,13 +4,14 @@
   "description": "⚡ 闪电龙虾 - 快如闪电的 AI 助手，乐高式插件架构",
   "type": "module",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
     "flashclaw": "./dist/cli.js"
   },
   "files": [
-    "dist",
-    "plugins",
-    "config"
+    "dist/**/*",
+    "plugins/**/*",
+    "config/**/*"
   ],
   "scripts": {
     "build": "tsc",
@@ -20,17 +21,19 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "postinstall": "node scripts/postinstall.js"
   },
   "keywords": [
     "ai",
     "assistant",
     "chatbot",
     "feishu",
-    "dingtalk",
     "claude",
+    "anthropic",
     "plugin",
-    "flashclaw"
+    "flashclaw",
+    "bot"
   ],
   "repository": {
     "type": "git",

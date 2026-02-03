@@ -24,6 +24,7 @@ import { currentModelSupportsVision, getCurrentModelId } from './core/model-capa
 import { MemoryManager, getMemoryManager as getGlobalMemoryManager } from './core/memory.js';
 import { pluginManager } from './plugins/manager.js';
 import { ToolContext, ToolResult as PluginToolResult } from './plugins/types.js';
+import { recordTokenUsage, checkCompactThreshold } from './session-tracker.js';
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -574,6 +575,21 @@ async function runAgentOnce(
       stopReason: finalResponse.stop_reason,
       contentTypes: finalResponse.content.map((c: any) => c.type)
     }, '⚡ API 响应');
+    
+    // 记录 token 使用
+    if (finalResponse.usage) {
+      const session = recordTokenUsage(input.chatJid, {
+        inputTokens: finalResponse.usage.input_tokens || 0,
+        outputTokens: finalResponse.usage.output_tokens || 0
+      }, getCurrentModelId());
+      
+      logger.info({
+        chatId: input.chatJid,
+        inputTokens: finalResponse.usage.input_tokens,
+        outputTokens: finalResponse.usage.output_tokens,
+        totalTokens: session.totalTokens
+      }, '📊 Token 统计');
+    }
 
     let result: string;
 

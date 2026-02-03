@@ -36,6 +36,8 @@ import { startSchedulerLoop, stopScheduler } from './task-scheduler.js';
 import { runAgent, writeTasksSnapshot, writeGroupsSnapshot, AvailableGroup } from './agent-runner.js';
 import { loadJson, saveJson } from './utils.js';
 import { MessageQueue, QueuedMessage } from './message-queue.js';
+import { isCommand, handleCommand, CommandContext, shouldSuggestCompact, getCompactSuggestion } from './commands.js';
+import { getSessionStats as getTrackerStats, resetSession as resetTrackerSession, checkCompactThreshold, getContextWindowSize } from './session-tracker.js';
 import Database from 'better-sqlite3';
 
 // 声明全局数据库变量类型（与 db.ts 保持一致）
@@ -166,7 +168,8 @@ let messageQueue: MessageQueue<Message>;
 let isShuttingDown = false;
 
 // 消息历史上下文配置
-const HISTORY_CONTEXT_LIMIT = 20;
+// 现在由 MemoryManager 基于 token 自动管理，这里只是一个备用限制
+const HISTORY_CONTEXT_LIMIT = 500;
 
 // "正在思考..." 提示配置
 // 注意：飞书不支持更新普通文本消息，所以默认禁用此功能
@@ -382,6 +385,17 @@ async function processQueuedMessage(queuedMsg: QueuedMessage<Message>): Promise<
       } else {
         await sendMessage(chatId, finalText, msg.platform);
       }
+      
+      // 检查是否需要提示用户压缩会话（70% 阈值）
+      const usagePercent = checkCompactThreshold(chatId);
+      if (usagePercent !== null) {
+        const stats = getTrackerStats(chatId);
+        if (stats) {
+          const suggestion = getCompactSuggestion(stats.tokenCount, stats.maxTokens);
+          await sendMessage(chatId, suggestion, msg.platform);
+          logger.info({ chatId, usagePercent }, '⚠️ 上下文使用率提示已发送');
+        }
+      }
     } else if (placeholderMessageId) {
       // 没有响应，删除占位消息
       try {
@@ -483,6 +497,107 @@ async function handleIncomingMessage(msg: Message): Promise<void> {
   
   if (!shouldTrigger) {
     return;
+  }
+
+  // 检查是否是斜杠命令
+  if (isCommand(msg.content)) {
+    const context: CommandContext = {
+      chatId,
+      userId: msg.senderId,
+      userName: msg.senderName || '用户',
+      platform: msg.platform,
+      getSessionStats: () => {
+        // 获取真实的 token 统计数据
+        const trackerStats = getTrackerStats(chatId);
+        if (trackerStats) {
+          return {
+            messageCount: trackerStats.messageCount,
+            tokenCount: trackerStats.tokenCount,
+            maxTokens: trackerStats.maxTokens,
+            model: trackerStats.model,
+            startedAt: trackerStats.startedAt
+          };
+        }
+        // 回退到历史记录（服务重启后 tracker 数据会丢失）
+        const history = getChatHistory(chatId, 1000);
+        const model = process.env.AI_MODEL || 'claude-4-5-sonnet-20250929';
+        return {
+          messageCount: history.length,
+          tokenCount: 0, // 服务重启后需要重新统计
+          maxTokens: getContextWindowSize(model),
+          model,
+          startedAt: history.length > 0 ? history[0].timestamp : undefined
+        };
+      },
+      resetSession: () => {
+        // 重置会话（清除内存中的 session ID 和 tracker）
+        if (sessions[group.folder]) {
+          delete sessions[group.folder];
+        }
+        resetTrackerSession(chatId);
+        logger.info({ chatId, folder: group.folder }, '⚡ 会话已重置');
+      },
+      getTasks: () => {
+        // 获取该会话的任务
+        const tasks = getAllTasks();
+        return tasks
+          .filter(t => t.chat_jid === chatId || group.folder === MAIN_GROUP_FOLDER)
+          .map(t => ({
+            id: t.id,
+            prompt: t.prompt,
+            scheduleType: t.schedule_type,
+            nextRun: t.next_run || undefined,
+            status: t.status
+          }));
+      },
+      compactSession: async () => {
+        // 压缩会话：让 AI 总结当前对话，然后重置会话
+        try {
+          const summary = await executeAgent(
+            group,
+            '请用 2-3 句话总结我们之前的对话要点，以便我们继续对话时能快速回顾。只输出总结，不要其他内容。',
+            chatId,
+            { userId: msg.senderId }
+          );
+          
+          // 重置会话和 tracker
+          if (sessions[group.folder]) {
+            delete sessions[group.folder];
+          }
+          resetTrackerSession(chatId);
+          
+          // 发送压缩完成消息
+          if (summary) {
+            await channelManager.sendMessage(
+              chatId,
+              `✅ **会话已压缩**\n\n📝 **对话摘要:**\n${summary}\n\n_上下文已清理，新对话已基于此摘要继续。_`,
+              msg.platform
+            );
+          }
+          
+          return summary;
+        } catch (error) {
+          logger.error({ error, chatId }, '会话压缩失败');
+          return null;
+        }
+      }
+    };
+
+    const result = handleCommand(msg.content, context);
+    
+    if (result.isCommand && result.shouldRespond && result.response) {
+      // 发送命令响应
+      await channelManager.sendMessage(chatId, result.response, msg.platform);
+      
+      // 如果是 /compact 命令，执行实际压缩
+      if (msg.content.trim().toLowerCase().startsWith('/compact') || 
+          msg.content.trim() === '/压缩') {
+        context.compactSession?.();
+      }
+      
+      logger.info({ chatId, command: msg.content }, '⚡ 命令已处理');
+      return;
+    }
   }
 
   // 添加到消息队列

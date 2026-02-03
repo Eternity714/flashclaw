@@ -22,14 +22,14 @@ const logger = createLogger('MemoryManager');
  * 记忆配置
  */
 export interface MemoryConfig {
-  /** 短期记忆条数限制（默认 50） */
-  shortTermLimit: number;
-  /** 触发压缩的 token 阈值（默认 80000） */
+  /** 上下文 token 限制（发送给 AI 的最大 token 数，默认 100000） */
+  contextTokenLimit: number;
+  /** 触发自动压缩的 token 阈值（默认 150000，略高于 70% 提示） */
   compactThreshold: number;
   /** 长期记忆存储目录（默认 data/memory） */
   memoryDir: string;
-  /** 压缩后保留的最近消息数（默认 10） */
-  compactKeepRecent: number;
+  /** 压缩后保留的 token 数（默认 30000） */
+  compactKeepTokens: number;
 }
 
 /**
@@ -104,10 +104,10 @@ export class MemoryManager {
   
   constructor(config: Partial<MemoryConfig> = {}) {
     this.config = {
-      shortTermLimit: config.shortTermLimit ?? 50,
-      compactThreshold: config.compactThreshold ?? 80000,
+      contextTokenLimit: config.contextTokenLimit ?? 100000,  // 发送给 AI 的上下文限制 100k tokens
+      compactThreshold: config.compactThreshold ?? 150000,    // 自动压缩阈值 150k tokens
       memoryDir: config.memoryDir ?? 'data/memory',
-      compactKeepRecent: config.compactKeepRecent ?? 10,
+      compactKeepTokens: config.compactKeepTokens ?? 30000,   // 压缩后保留 30k tokens
     };
     
     // 确保记忆目录存在
@@ -118,24 +118,50 @@ export class MemoryManager {
   
   /**
    * 获取群组的对话上下文
+   * 基于 token 限制返回消息（从最新到最旧）
    * 
    * @param groupId - 群组 ID
-   * @param limit - 限制返回的消息数量（可选）
+   * @param maxTokens - 最大 token 数（可选，默认使用配置值）
    * @returns 消息列表
    */
-  getContext(groupId: string, limit?: number): ChatMessage[] {
+  getContext(groupId: string, maxTokens?: number): ChatMessage[] {
     const messages = this.shortTermMemory.get(groupId) || [];
-    const effectiveLimit = limit ?? this.config.shortTermLimit;
+    const tokenLimit = maxTokens ?? this.config.contextTokenLimit;
     
-    // 如果有压缩摘要，将其作为第一条系统消息的一部分
-    // 但这里只返回原始消息，摘要在 buildSystemPrompt 中处理
-    
-    if (messages.length <= effectiveLimit) {
-      return [...messages];
+    if (messages.length === 0) {
+      return [];
     }
     
-    // 返回最近的 N 条消息
-    return messages.slice(-effectiveLimit);
+    // 从最新的消息开始，累计 token 直到达到限制
+    const result: ChatMessage[] = [];
+    let totalTokens = 0;
+    
+    // 从后往前遍历（最新的消息优先）
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      const msgTokens = this.estimateMessageTokens(msg);
+      
+      if (totalTokens + msgTokens > tokenLimit) {
+        break;
+      }
+      
+      result.unshift(msg); // 添加到开头，保持顺序
+      totalTokens += msgTokens;
+    }
+    
+    return result;
+  }
+  
+  /**
+   * 估算单条消息的 token 数
+   * 中文约 2 字符/token，英文约 4 字符/token
+   */
+  private estimateMessageTokens(message: ChatMessage): number {
+    const content = typeof message.content === 'string' 
+      ? message.content 
+      : JSON.stringify(message.content);
+    // 保守估计：平均 2 字符/token，加上角色和格式开销
+    return Math.ceil(content.length / 2) + 10;
   }
   
   /**
@@ -152,8 +178,10 @@ export class MemoryManager {
     const messages = this.shortTermMemory.get(groupId)!;
     messages.push({ ...message });
     
-    // 超出限制时，移除最旧的消息（但保留摘要）
-    while (messages.length > this.config.shortTermLimit * 2) {
+    // 检查总 token 数，如果超过阈值的 2 倍，移除最旧的消息
+    // 这是一个软限制，真正的压缩在 needsCompaction 中触发
+    const maxStorageTokens = this.config.compactThreshold * 2;
+    while (this.estimateTokens(messages) > maxStorageTokens && messages.length > 10) {
       messages.shift();
     }
   }
@@ -462,7 +490,7 @@ export class MemoryManager {
   
   /**
    * 压缩对话上下文
-   * 将旧消息总结为摘要，只保留最近的消息
+   * 将旧消息总结为摘要，只保留最近的消息（基于 token 限制）
    * 
    * @param groupId - 群组 ID
    * @param apiClient - API 客户端（用于生成摘要）
@@ -471,9 +499,10 @@ export class MemoryManager {
   async compact(groupId: string, apiClient: ApiClient): Promise<CompactResult> {
     const messages = this.shortTermMemory.get(groupId) || [];
     const originalCount = messages.length;
+    const originalTokens = this.estimateTokens(messages);
     
-    if (originalCount <= this.config.compactKeepRecent) {
-      // 消息太少，无需压缩
+    if (originalTokens <= this.config.compactKeepTokens) {
+      // token 数太少，无需压缩
       return {
         originalCount,
         compactedCount: originalCount,
@@ -482,23 +511,58 @@ export class MemoryManager {
       };
     }
     
-    // 分离要压缩的消息和要保留的最近消息
-    const toCompress = messages.slice(0, -this.config.compactKeepRecent);
-    const toKeep = messages.slice(-this.config.compactKeepRecent);
+    // 基于 token 数量决定保留多少消息
+    // 从最新的消息开始，累计 token 直到达到 compactKeepTokens
+    const toKeep: ChatMessage[] = [];
+    let keepTokens = 0;
+    
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      const msgTokens = this.estimateMessageTokens(msg);
+      
+      if (keepTokens + msgTokens > this.config.compactKeepTokens) {
+        break;
+      }
+      
+      toKeep.unshift(msg);
+      keepTokens += msgTokens;
+    }
+    
+    // 要压缩的消息（旧消息）
+    const toCompress = messages.slice(0, messages.length - toKeep.length);
+    
+    if (toCompress.length === 0) {
+      return {
+        originalCount,
+        compactedCount: originalCount,
+        summary: '',
+        savedTokens: 0,
+      };
+    }
     
     // 生成摘要
     const summary = await this.generateSummary(toCompress, apiClient);
     
     // 估算节省的 token
-    const originalTokens = this.estimateTokens(toCompress);
+    const compressedTokens = this.estimateTokens(toCompress);
     const summaryTokens = Math.ceil(summary.length / 2);
-    const savedTokens = Math.max(0, originalTokens - summaryTokens);
+    const savedTokens = Math.max(0, compressedTokens - summaryTokens);
     
     // 更新短期记忆
     this.shortTermMemory.set(groupId, toKeep);
     
     // 缓存摘要
     this.summaryCache.set(groupId, summary);
+    
+    logger.info({
+      groupId,
+      originalTokens,
+      compressedTokens,
+      keepTokens,
+      savedTokens,
+      originalCount,
+      compactedCount: toKeep.length
+    }, '📦 上下文已压缩');
     
     return {
       originalCount,

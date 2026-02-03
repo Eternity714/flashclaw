@@ -31,3 +31,22 @@ export {
   stopWatching,
   getLoadedPaths,
 } from './loader.js';
+
+// 插件安装器
+export {
+  PluginInfo,
+  Registry,
+  InstalledPluginMeta,
+  getUserPluginsDir,
+  getRegistry,
+  updateRegistry,
+  downloadPlugin,
+  validatePlugin,
+  installPlugin,
+  uninstallPlugin,
+  listInstalledPlugins,
+  listAvailablePlugins,
+  updatePlugin,
+  showPluginInfo,
+  printPluginList,
+} from './installer.js';
