@@ -43,8 +43,8 @@
 │  │                      插件系统                                │    │
 │  │  ┌─────────────────┐  ┌─────────────────────────────────┐   │    │
 │  │  │  渠道插件        │  │  工具插件                        │   │    │
-│  │  │  ├─ feishu      │  │  ├─ send-message                │   │    │
-│  │  │  └─ dingtalk    │  │  ├─ schedule-task               │   │    │
+│  │  │  └─ feishu      │  │  ├─ send-message                │   │    │
+│  │  │                 │  │  ├─ schedule-task               │   │    │
 │  │  │                 │  │  ├─ list-tasks                  │   │    │
 │  │  │                 │  │  ├─ cancel-task                 │   │    │
 │  │  │                 │  │  ├─ pause-task                  │   │    │
@@ -85,7 +85,7 @@
 
 | 组件 | 技术 | 用途 |
 |------|------|------|
-| 消息连接 | 飞书 SDK / 钉钉 SDK | 连接消息平台，发送/接收消息 |
+| 消息连接 | 飞书 SDK | 连接消息平台，发送/接收消息 |
 | 消息存储 | SQLite (better-sqlite3) | 存储消息用于处理 |
 | AI 调用 | 直接 API 调用 | 支持 Anthropic 及兼容 API |
 | 运行时 | Node.js 20+ | 主进程，路由、调度、代理执行 |
@@ -135,9 +135,6 @@ flashclaw/
 │
 ├── plugins/                       # 插件目录（热加载）
 │   ├── feishu/                    # 飞书渠道插件
-│   │   ├── plugin.json
-│   │   └── index.ts
-│   ├── dingtalk/                  # 钉钉渠道插件
 │   │   ├── plugin.json
 │   │   └── index.ts
 │   ├── send-message/              # 发送消息工具
@@ -255,7 +252,6 @@ FlashClaw 采用乐高式插件架构，所有渠道和工具都是插件。
 | 插件 | 类型 | 说明 |
 |------|------|------|
 | feishu | channel | 飞书 WebSocket 长连接 |
-| dingtalk | channel | 钉钉 Stream API |
 | send-message | tool | 发送消息到聊天 |
 | schedule-task | tool | 创建定时任务 |
 | list-tasks | tool | 列出定时任务 |

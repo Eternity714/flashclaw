@@ -613,8 +613,6 @@ function getCurrentModelId(): string;
 | `ANTHROPIC_API_KEY` | API Key | - |
 | `FEISHU_APP_ID` | 飞书应用 ID | - |
 | `FEISHU_APP_SECRET` | 飞书应用密钥 | - |
-| `DINGTALK_APP_KEY` | 钉钉应用 Key | - |
-| `DINGTALK_APP_SECRET` | 钉钉应用密钥 | - |
 
 ---
 

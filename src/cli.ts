@@ -243,12 +243,10 @@ async function interactiveInit(): Promise<void> {
     // 检查是否已有配置
     const existingEnv = loadEnv();
     const hasFeishu = existingEnv.FEISHU_APP_ID && existingEnv.FEISHU_APP_SECRET;
-    const hasDingtalk = existingEnv.DINGTALK_APP_KEY && existingEnv.DINGTALK_APP_SECRET;
     
-    if (hasFeishu || hasDingtalk) {
+    if (hasFeishu) {
       console.log(`${warn('⚠')} 检测到已有配置:`);
-      if (hasFeishu) console.log(`   ${success} 飞书已配置`);
-      if (hasDingtalk) console.log(`   ${success} 钉钉已配置`);
+      console.log(`   ${success} 飞书已配置`);
       console.log('');
       
       const overwrite = await question(`${lightning} 是否重新配置? (y/N): `);
@@ -259,49 +257,21 @@ async function interactiveInit(): Promise<void> {
       }
     }
     
-    // 选择平台
-    console.log(`\n${lightning} ${info('选择要配置的消息平台:')}`);
-    console.log(`   ${chalk.white('1.')} 飞书 (Feishu/Lark)`);
-    console.log(`   ${chalk.white('2.')} 钉钉 (DingTalk)`);
-    console.log(`   ${chalk.white('3.')} 两者都配置`);
-    console.log('');
-    
-    const platform = await question(`${lightning} 请选择 (1/2/3): `);
-    
     const env: Record<string, string> = { ...existingEnv };
     
     // 配置飞书
-    if (platform === '1' || platform === '3') {
-      console.log(`\n${lightning} ${info('配置飞书:')}`);
-      console.log(dim('   获取方式: https://open.feishu.cn/app → 创建应用 → 凭证与基础信息\n'));
-      
-      const appId = await question(`   ${info('App ID')}: `);
-      const appSecret = await question(`   ${info('App Secret')}: `);
-      
-      if (appId && appSecret) {
-        env.FEISHU_APP_ID = appId;
-        env.FEISHU_APP_SECRET = appSecret;
-        console.log(`   ${success} 飞书配置完成`);
-      } else {
-        console.log(`   ${error} 跳过飞书配置`);
-      }
-    }
+    console.log(`\n${lightning} ${info('配置飞书:')}`);
+    console.log(dim('   获取方式: https://open.feishu.cn/app → 创建应用 → 凭证与基础信息\n'));
     
-    // 配置钉钉
-    if (platform === '2' || platform === '3') {
-      console.log(`\n${lightning} ${info('配置钉钉:')}`);
-      console.log(dim('   获取方式: https://open-dev.dingtalk.com → 创建应用 → 应用凭证\n'));
-      
-      const appKey = await question(`   ${info('App Key')}: `);
-      const appSecret = await question(`   ${info('App Secret')}: `);
-      
-      if (appKey && appSecret) {
-        env.DINGTALK_APP_KEY = appKey;
-        env.DINGTALK_APP_SECRET = appSecret;
-        console.log(`   ${success} 钉钉配置完成`);
-      } else {
-        console.log(`   ${error} 跳过钉钉配置`);
-      }
+    const appId = await question(`   ${info('App ID')}: `);
+    const appSecret = await question(`   ${info('App Secret')}: `);
+    
+    if (appId && appSecret) {
+      env.FEISHU_APP_ID = appId;
+      env.FEISHU_APP_SECRET = appSecret;
+      console.log(`   ${success} 飞书配置完成`);
+    } else {
+      console.log(`   ${error} 跳过飞书配置`);
     }
     
     // 配置机器人名称
@@ -320,7 +290,7 @@ async function interactiveInit(): Promise<void> {
     console.log(`\n${lightning}${lightning}${lightning} ${chalk.green.bold('初始化完成!')} ${lightning}${lightning}${lightning}\n`);
     console.log(`${lightning} 下一步:`);
     console.log(`   ${info('1.')} 运行 ${chalk.white('flashclaw start')} 启动服务`);
-    console.log(`   ${info('2.')} 在飞书/钉钉中添加机器人到群聊`);
+    console.log(`   ${info('2.')} 在飞书中添加机器人到群聊`);
     console.log(`   ${info('3.')} @机器人 开始对话\n`);
     
   } finally {
@@ -344,10 +314,9 @@ async function startService(daemon: boolean): Promise<void> {
   // 检查配置
   const env = loadEnv();
   const hasFeishu = env.FEISHU_APP_ID && env.FEISHU_APP_SECRET;
-  const hasDingtalk = env.DINGTALK_APP_KEY && env.DINGTALK_APP_SECRET;
   
-  if (!hasFeishu && !hasDingtalk) {
-    console.log(`${error} 未配置任何消息平台`);
+  if (!hasFeishu) {
+    console.log(`${error} 未配置消息平台`);
     console.log(`${lightning} 运行 ${info('flashclaw init')} 进行初始化配置`);
     process.exit(1);
   }
@@ -492,10 +461,8 @@ function showStatus(): void {
   console.log(`${lightning} ${chalk.bold('平台配置')}\n`);
   
   const hasFeishu = env.FEISHU_APP_ID && env.FEISHU_APP_SECRET;
-  const hasDingtalk = env.DINGTALK_APP_KEY && env.DINGTALK_APP_SECRET;
   
   console.log(`   飞书: ${hasFeishu ? chalk.green('已配置') : chalk.gray('未配置')}`);
-  console.log(`   钉钉: ${hasDingtalk ? chalk.green('已配置') : chalk.gray('未配置')}`);
   
   console.log('');
   console.log(`${lightning} ${chalk.bold('路径信息')}\n`);

@@ -37,7 +37,6 @@ flashclaw/
 │
 ├── plugins/               # 插件目录（热加载）
 │   ├── feishu/           # 飞书渠道插件
-│   ├── dingtalk/         # 钉钉渠道插件
 │   ├── send-message/     # 发送消息工具
 │   ├── schedule-task/    # 创建定时任务
 │   ├── list-tasks/       # 列出定时任务
@@ -230,7 +229,7 @@ const plugin: ToolPlugin = {
 
 ## 渠道插件开发
 
-渠道插件连接外部消息平台（飞书、钉钉等）。
+渠道插件连接外部消息平台（飞书、Telegram 等）。
 
 ### 基本结构
 

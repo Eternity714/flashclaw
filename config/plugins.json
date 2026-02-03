@@ -3,9 +3,6 @@
     "feishu": {
       "enabled": true
     },
-    "dingtalk": {
-      "enabled": true
-    },
     "send-message": {
       "enabled": true
     },

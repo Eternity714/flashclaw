@@ -36,6 +36,13 @@ import { startSchedulerLoop, stopScheduler } from './task-scheduler.js';
 import { runAgent, writeTasksSnapshot, writeGroupsSnapshot, AvailableGroup } from './agent-runner.js';
 import { loadJson, saveJson } from './utils.js';
 import { MessageQueue, QueuedMessage } from './message-queue.js';
+import Database from 'better-sqlite3';
+
+// 声明全局数据库变量类型（与 db.ts 保持一致）
+declare global {
+  // eslint-disable-next-line no-var
+  var __flashclaw_db: Database.Database | undefined;
+}
 
 // ⚡ FlashClaw Logger
 const logger = pino({
@@ -136,7 +143,6 @@ class ChannelManager {
   getPlatformDisplayName(platform: string): string {
     const names: Record<string, string> = {
       'feishu': '飞书',
-      'dingtalk': '钉钉',
     };
     return names[platform] || platform;
   }
@@ -157,6 +163,7 @@ let sessions: Session = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageQueue: MessageQueue<Message>;
+let isShuttingDown = false;
 
 // 消息历史上下文配置
 const HISTORY_CONTEXT_LIMIT = 20;
@@ -866,15 +873,11 @@ export async function main(): Promise<void> {
 \x1b[0m
   \x1b[31m✗ 缺少消息平台配置\x1b[0m
 
-  请在 \x1b[33m.env\x1b[0m 中配置至少一个平台:
+  请在 \x1b[33m.env\x1b[0m 中配置飞书:
 
   \x1b[36m飞书:\x1b[0m
     FEISHU_APP_ID=cli_xxxxx
     FEISHU_APP_SECRET=xxxxx
-
-  \x1b[36m钉钉:\x1b[0m
-    DINGTALK_APP_KEY=xxxxx
-    DINGTALK_APP_SECRET=xxxxx
 
   详见 \x1b[33m.env.example\x1b[0m
 `);
@@ -926,58 +929,78 @@ export async function main(): Promise<void> {
 
 // ==================== 优雅关闭 ====================
 
-let isShuttingDown = false;
+/**
+ * 优雅关闭函数
+ */
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  
+  logger.info({ signal }, '⚡ 收到关闭信号，正在优雅关闭...');
+  
+  try {
+    // 1. 停止接收新消息
+    logger.info('⚡ 停止接收新消息...');
+    await pluginManager.stopAll();
+    
+    // 2. 等待当前任务完成（最多等待 30 秒）
+    logger.info('⚡ 等待当前任务完成...');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // 3. 停止消息队列
+    logger.info('⚡ 停止消息队列...');
+    messageQueue?.stop();
+    
+    // 4. 停止任务调度器
+    logger.info('⚡ 停止任务调度器...');
+    stopScheduler();
+    
+    // 5. 停止插件目录监听
+    logger.info('⚡ 停止插件监听...');
+    stopWatching();
+    
+    // 6. 关闭数据库连接
+    logger.info('⚡ 关闭数据库连接...');
+    try {
+      // 访问全局数据库实例
+      if (global.__flashclaw_db) {
+        global.__flashclaw_db.close();
+        global.__flashclaw_db = undefined;
+      }
+    } catch (err) {
+      logger.warn({ err }, '关闭数据库连接时出错');
+    }
+    
+    // 7. 卸载插件
+    logger.info('⚡ 卸载插件...');
+    await pluginManager.clear();
+    
+    // 8. 保存状态
+    logger.info('⚡ 保存状态...');
+    saveState();
+    
+    logger.info('⚡ FlashClaw 已安全关闭');
+    process.exit(0);
+  } catch (error) {
+    logger.error({ error }, '关闭时发生错误');
+    process.exit(1);
+  }
+}
 
 /**
  * 设置优雅关闭处理
  */
 function setupGracefulShutdown(): void {
-  const shutdown = async (signal: string) => {
-    if (isShuttingDown) {
-      logger.warn('正在关闭中，请稍候...');
-      return;
-    }
-    isShuttingDown = true;
-    
-    logger.info({ signal }, '⚡ 收到关闭信号，正在优雅关闭...');
-    
-    try {
-      // 1. 停止接收新消息（停止渠道插件）
-      logger.debug('停止渠道插件...');
-      await pluginManager.stopAll();
-      
-      // 2. 停止消息队列（等待当前任务完成）
-      logger.debug('停止消息队列...');
-      messageQueue?.stop();
-      
-      // 3. 停止任务调度器
-      logger.debug('停止任务调度器...');
-      stopScheduler();
-      
-      // 4. 停止插件目录监听
-      logger.debug('停止插件监听...');
-      stopWatching();
-      
-      // 5. 保存状态
-      logger.debug('保存状态...');
-      saveState();
-      
-      logger.info('⚡ FlashClaw 已安全关闭');
-      process.exit(0);
-    } catch (err) {
-      logger.error({ err }, '关闭过程中发生错误');
-      process.exit(1);
-    }
-  };
-  
   // 监听关闭信号
-  process.on('SIGINT', () => shutdown('SIGINT'));   // Ctrl+C
-  process.on('SIGTERM', () => shutdown('SIGTERM')); // kill
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   
   // 未捕获异常处理
   process.on('uncaughtException', (err) => {
     logger.error({ err }, '未捕获异常');
-    shutdown('uncaughtException');
+    gracefulShutdown('uncaughtException').catch(() => {
+      process.exit(1);
+    });
   });
   
   process.on('unhandledRejection', (reason) => {
