@@ -1,0 +1,8 @@
+{
+  "name": "browser-control",
+  "version": "1.0.0",
+  "type": "tool",
+  "description": "浏览器自动化控制",
+  "main": "index.ts",
+  "author": "GuLu9527"
+}
