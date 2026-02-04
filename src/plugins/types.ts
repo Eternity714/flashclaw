@@ -84,11 +84,18 @@ export interface ToolPlugin {
   name: string;
   version: string;
   description: string;
-  schema: ToolSchema;
+  
+  // 单工具模式：使用 schema
+  schema?: ToolSchema;
+  // 多工具模式：使用 tools 数组
+  tools?: ToolSchema[];
   
   init?(config: PluginConfig): Promise<void>;
-  execute(params: unknown, context: ToolContext): Promise<ToolResult>;
+  // 单工具：execute(params, context)
+  // 多工具：execute(toolName, params, context)
+  execute(paramsOrToolName: unknown, contextOrParams?: ToolContext | unknown, context?: ToolContext): Promise<ToolResult>;
   reload?(): Promise<void>;
+  cleanup?(): Promise<void>;
 }
 
 // 发送消息选项
@@ -132,7 +139,7 @@ export type Plugin = ToolPlugin | ChannelPlugin;
 
 // 类型守卫
 export function isToolPlugin(plugin: Plugin): plugin is ToolPlugin {
-  return 'schema' in plugin && 'execute' in plugin;
+  return ('schema' in plugin || 'tools' in plugin) && 'execute' in plugin;
 }
 
 export function isChannelPlugin(plugin: Plugin): plugin is ChannelPlugin {

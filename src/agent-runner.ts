@@ -144,10 +144,15 @@ export function createToolExecutor(ctx: IpcContext, memoryManager: MemoryManager
     logger.info({ tool: name, params }, '⚡ 执行工具');
 
     // 使用插件工具
-    const plugin = pluginManager.getTool(name);
-    if (plugin) {
+    const toolInfo = pluginManager.getTool(name);
+    if (toolInfo) {
+      const { plugin, isMultiTool } = toolInfo;
       try {
-        const result = await plugin.execute(params, pluginContext);
+        // 多工具插件：execute(toolName, params, context)
+        // 单工具插件：execute(params, context)
+        const result = isMultiTool
+          ? await plugin.execute(name, params, pluginContext)
+          : await plugin.execute(params, pluginContext);
         logger.info({ tool: name, success: result.success, error: result.error }, '⚡ 插件执行结果');
         if (result.success) {
           return { 

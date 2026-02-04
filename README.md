@@ -28,6 +28,10 @@ npm install -g flashclaw
 flashclaw start
 ```
 
+## 更新日志
+
+详见 [CHANGELOG.md](CHANGELOG.md)
+
 ## CLI 命令
 
 | 命令 | 说明 |
@@ -171,13 +175,14 @@ flashclaw/
 │   ├── pause-task/          # 暂停任务
 │   ├── resume-task/         # 恢复任务
 │   ├── send-message/        # 发送消息
-│   ├── register-group/      # 注册群组
-│   └── registry.json        # 可安装插件索引
+│   └── register-group/      # 注册群组
 │
 └── community-plugins/        # 社区/官方扩展插件
     ├── hello-world/         # 测试插件
     └── web-fetch/           # 网页内容获取
 ```
+
+> community-plugins 作为扩展插件库示例，默认不随 npm 包发布，可通过插件安装命令单独获取。
 
 ## 功能特性
 

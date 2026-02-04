@@ -36,6 +36,8 @@ type PageState = {
   console: BrowserConsoleMessage[];
   errors: BrowserPageError[];
   roleRefs?: RoleRefMap;
+  roleRefsTargetId?: string;
+  roleRefsCdpUrl?: string;
 };
 
 /** Connected browser instance */
@@ -167,6 +169,12 @@ function ensurePageState(page: Page): PageState {
 
     // Cleanup on page close
     page.on("close", () => {
+      if (state.roleRefsTargetId && state.roleRefsCdpUrl) {
+        const globalState = getGlobalState();
+        globalState.roleRefsByTarget.delete(
+          roleRefsKey(state.roleRefsCdpUrl, state.roleRefsTargetId)
+        );
+      }
       pageStates.delete(page);
       observedPages.delete(page);
     });
@@ -249,6 +257,12 @@ export async function connectBrowser(cdpUrl: string): Promise<Browser> {
         browser.on("disconnected", () => {
           if (state.cached?.browser === browser) {
             state.cached = null;
+          }
+          const prefix = `${normalized}::`;
+          for (const key of state.roleRefsByTarget.keys()) {
+            if (key.startsWith(prefix)) {
+              state.roleRefsByTarget.delete(key);
+            }
           }
         });
 
@@ -333,6 +347,8 @@ export async function getPage(cdpUrl: string, targetId?: string): Promise<Page> 
     const cachedRefs = globalState.roleRefsByTarget.get(roleRefsKey(cdpUrl, resolvedTargetId));
     if (cachedRefs) {
       pageState.roleRefs = cachedRefs;
+      pageState.roleRefsTargetId = resolvedTargetId;
+      pageState.roleRefsCdpUrl = normalizeCdpUrl(cdpUrl);
     }
   }
 
@@ -345,6 +361,8 @@ export async function getPage(cdpUrl: string, targetId?: string): Promise<Page> 
 export async function storeRoleRefs(page: Page, refs: RoleRefMap): Promise<void> {
   const pageState = ensurePageState(page);
   pageState.roleRefs = refs;
+  pageState.roleRefsTargetId = undefined;
+  pageState.roleRefsCdpUrl = undefined;
 }
 
 /**
@@ -374,6 +392,8 @@ export async function storeRoleRefsForTarget(opts: {
 
   const globalState = getGlobalState();
   globalState.roleRefsByTarget.set(roleRefsKey(normalizedCdpUrl, targetId), opts.refs);
+  pageState.roleRefsTargetId = targetId;
+  pageState.roleRefsCdpUrl = normalizeCdpUrl(normalizedCdpUrl);
   while (globalState.roleRefsByTarget.size > MAX_ROLE_REFS_CACHE) {
     const first = globalState.roleRefsByTarget.keys().next();
     if (first.done) break;
@@ -411,6 +431,8 @@ export async function restoreRoleRefsForTarget(opts: {
   const pageState = ensurePageState(opts.page);
   if (!pageState.roleRefs) {
     pageState.roleRefs = cachedRefs;
+    pageState.roleRefsTargetId = targetId;
+    pageState.roleRefsCdpUrl = normalizeCdpUrl(normalizedCdpUrl);
   }
 }
 

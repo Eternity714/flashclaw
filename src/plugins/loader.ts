@@ -324,9 +324,9 @@ export async function reloadPlugin(name: string): Promise<boolean> {
   }
 
   // 获取旧插件
-  const oldTool = pluginManager.getTool(name);
+  const oldToolInfo = pluginManager.getTool(name);
   const oldChannel = pluginManager.getChannel(name);
-  const oldPlugin = oldTool || oldChannel;
+  const oldPlugin = oldToolInfo?.plugin || oldChannel;
 
   // 调用 reload 钩子（如果有）
   if (oldPlugin?.reload) {
@@ -389,42 +389,48 @@ export function watchPlugins(
     const existingTimer = debounceTimers.get(pluginName);
     if (existingTimer) clearTimeout(existingTimer);
 
-    debounceTimers.set(pluginName, setTimeout(async () => {
-      debounceTimers.delete(pluginName);
+    debounceTimers.set(pluginName, setTimeout(() => {
+      void (async () => {
+        try {
+          debounceTimers.delete(pluginName);
 
-      const pluginPath = join(absDir, pluginName);
-      const isLoaded = loadedPaths.has(pluginName);
+          const pluginPath = join(absDir, pluginName);
+          const isLoaded = loadedPaths.has(pluginName);
 
-      // 检查插件目录是否还存在
-      let exists = false;
-      try {
-        await fs.access(pluginPath);
-        exists = true;
-      } catch {}
+          // 检查插件目录是否还存在
+          let exists = false;
+          try {
+            await fs.access(pluginPath);
+            exists = true;
+          } catch {}
 
-      if (exists && isLoaded) {
-        // 检查内容是否真的变化了
-        const newHash = await getPluginHash(pluginPath);
-        const oldHash = contentHashes.get(pluginName);
-        
-        if (newHash !== oldHash) {
-          // 内容真的变了，重载
-          await reloadPlugin(pluginName);
-          onChange?.('change', pluginName);
-        } else {
-          // 内容没变（可能是 jiti 缓存或访问时间变化），忽略
-          logger.debug({ plugin: pluginName }, '插件文件访问但内容未变，忽略');
+          if (exists && isLoaded) {
+            // 检查内容是否真的变化了
+            const newHash = await getPluginHash(pluginPath);
+            const oldHash = contentHashes.get(pluginName);
+            
+            if (newHash !== oldHash) {
+              // 内容真的变了，重载
+              await reloadPlugin(pluginName);
+              onChange?.('change', pluginName);
+            } else {
+              // 内容没变（可能是 jiti 缓存或访问时间变化），忽略
+              logger.debug({ plugin: pluginName }, '插件文件访问但内容未变，忽略');
+            }
+          } else if (exists && !isLoaded) {
+            // 新插件，加载
+            const name = await loadPlugin(pluginPath);
+            if (name) onChange?.('add', name);
+          } else if (!exists && isLoaded) {
+            // 插件被删除，卸载
+            await pluginManager.unregister(pluginName);
+            loadedPaths.delete(pluginName);
+            onChange?.('remove', pluginName);
+          }
+        } catch (err) {
+          logger.error({ err, plugin: pluginName }, '插件目录变更处理失败');
         }
-      } else if (exists && !isLoaded) {
-        // 新插件，加载
-        const name = await loadPlugin(pluginPath);
-        if (name) onChange?.('add', name);
-      } else if (!exists && isLoaded) {
-        // 插件被删除，卸载
-        await pluginManager.unregister(pluginName);
-        loadedPaths.delete(pluginName);
-        onChange?.('remove', pluginName);
-      }
+      })();
     }, 500));
   });
 

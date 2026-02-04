@@ -93,7 +93,13 @@ export class PluginManager {
 
     for (const entry of this.plugins.values()) {
       if (entry.type === 'tool' && isToolPlugin(entry.plugin)) {
-        schemas.push(entry.plugin.schema);
+        // 支持多工具插件（tools 数组）
+        if (entry.plugin.tools && Array.isArray(entry.plugin.tools)) {
+          schemas.push(...entry.plugin.tools);
+        } else if (entry.plugin.schema) {
+          // 单工具插件
+          schemas.push(entry.plugin.schema);
+        }
       }
     }
 
@@ -117,13 +123,29 @@ export class PluginManager {
 
   /**
    * 获取指定工具插件
-   * @param name 工具名称
+   * @param toolName 工具名称
+   * @returns 插件和是否为多工具模式
    */
-  getTool(name: string): ToolPlugin | null {
-    const entry = this.plugins.get(name);
+  getTool(toolName: string): { plugin: ToolPlugin; isMultiTool: boolean } | null {
+    // 1. 先按插件名称查找（单工具模式：插件名 = 工具名）
+    const entry = this.plugins.get(toolName);
     if (entry && entry.type === 'tool' && isToolPlugin(entry.plugin)) {
-      return entry.plugin;
+      return { plugin: entry.plugin, isMultiTool: false };
     }
+    
+    // 2. 再在所有工具插件的 tools 数组中查找（多工具模式）
+    for (const pluginEntry of this.plugins.values()) {
+      if (pluginEntry.type === 'tool' && isToolPlugin(pluginEntry.plugin)) {
+        const plugin = pluginEntry.plugin;
+        if (plugin.tools && Array.isArray(plugin.tools)) {
+          const found = plugin.tools.some(t => t.name === toolName);
+          if (found) {
+            return { plugin, isMultiTool: true };
+          }
+        }
+      }
+    }
+    
     return null;
   }
 

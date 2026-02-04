@@ -421,8 +421,8 @@ async function tryHandleDirectWebFetch(msg: Message, group: RegisteredGroup): Pr
     return true;
   }
 
-  const tool = pluginManager.getTool(WEB_FETCH_TOOL_NAME);
-  if (!tool) {
+  const toolInfo = pluginManager.getTool(WEB_FETCH_TOOL_NAME);
+  if (!toolInfo) {
     await sendMessage(msg.chatId, `${BOT_NAME}: 未检测到 web_fetch 插件，请先安装后再使用。`, msg.platform);
     return true;
   }
@@ -441,7 +441,10 @@ async function tryHandleDirectWebFetch(msg: Message, group: RegisteredGroup): Pr
 
   let result: { success: boolean; data?: unknown; error?: string };
   try {
-    result = await tool.execute({ url: normalizedUrl, allowPrivate }, toolContext);
+    const { plugin, isMultiTool } = toolInfo;
+    result = isMultiTool
+      ? await plugin.execute(WEB_FETCH_TOOL_NAME, { url: normalizedUrl, allowPrivate }, toolContext)
+      : await plugin.execute({ url: normalizedUrl, allowPrivate }, toolContext);
   } catch (error) {
     result = { success: false, error: error instanceof Error ? error.message : String(error) };
   }

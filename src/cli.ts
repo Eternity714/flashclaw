@@ -4,6 +4,10 @@
  * ⚡ 闪电龙虾 - 快如闪电的 AI 助手
  */
 
+import { readFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+
 // ==================== ANSI 颜色代码 ====================
 const colors = {
   green: '\x1b[32m',
@@ -27,7 +31,17 @@ const PLUGIN_NAME_PATTERN = /^[a-z0-9][a-z0-9-_]{0,63}$/;
 const isValidPluginName = (name: string) => PLUGIN_NAME_PATTERN.test(name);
 
 // ==================== 版本信息 ====================
-const VERSION = '1.0.0';
+const VERSION = (() => {
+  try {
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const pkgPath = join(__dirname, '..', 'package.json');
+    const raw = readFileSync(pkgPath, 'utf-8');
+    const pkg = JSON.parse(raw) as { version?: string };
+    return pkg.version ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+})();
 
 // ==================== Banner ====================
 function showBanner(): void {
