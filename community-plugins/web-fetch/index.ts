@@ -5,6 +5,7 @@
 
 import type { ToolPlugin, ToolContext, ToolResult } from '../../src/plugins/types.js';
 import { fetch as undiciFetch, ProxyAgent, Agent } from 'undici';
+import type { RequestInit, Response } from 'undici';
 import { lookup as dnsLookup } from 'dns/promises';
 import { isIP } from 'net';
 import * as cheerio from 'cheerio';
@@ -230,6 +231,14 @@ async function fetchWithGuard(
       }
 
       const nextUrl = new URL(location, urlObj).toString();
+      const nextUrlObj = new URL(nextUrl);
+      if (!['http:', 'https:'].includes(nextUrlObj.protocol)) {
+        await close();
+        throw new Error('只支持 HTTP/HTTPS 协议');
+      }
+      if (!allowPrivate) {
+        await resolvePublicAddresses(nextUrlObj.hostname, false);
+      }
       if (visited.has(nextUrl)) {
         await close();
         throw new Error('检测到重定向循环');
@@ -349,7 +358,7 @@ function isTextLikeContent(contentType: string | null): boolean {
   );
 }
 
-function extractFromHtml(html: string, selector?: string, mode: 'text' | 'html' | 'markdown'): { content: string; title?: string } {
+function extractFromHtml(html: string, mode: 'text' | 'html' | 'markdown', selector?: string): { content: string; title?: string } {
   const $ = cheerio.load(html);
   const title = $('title').first().text().trim() || undefined;
   const fragment = selector ? $(selector).map((_, el) => $.html(el)).get().join('\n') : html;
@@ -573,7 +582,7 @@ const plugin: ToolPlugin = {
 
       if (isHtml) {
         const mode = extract === 'auto' ? 'text' : extract;
-        const extracted = extractFromHtml(text, input.selector, mode === 'auto' ? 'text' : mode);
+        const extracted = extractFromHtml(text, mode, input.selector);
         content = extracted.content;
         title = extracted.title;
       } else if (extract === 'html') {

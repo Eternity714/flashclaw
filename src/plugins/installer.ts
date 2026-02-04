@@ -5,7 +5,7 @@
 
 import { promises as fs } from 'fs';
 import { existsSync } from 'fs';
-import { join, basename, dirname, resolve, sep, isAbsolute, normalize } from 'path';
+import { join, basename, dirname, resolve, sep, isAbsolute, normalize, relative } from 'path';
 import { homedir, platform } from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -132,9 +132,8 @@ function resolvePluginDir(baseDir: string, name: string): string | null {
   if (!isValidPluginName(name)) return null;
   const base = resolve(baseDir);
   const target = resolve(baseDir, name);
-  const normalizedBase = base.toLowerCase();
-  const normalizedTarget = target.toLowerCase();
-  if (!normalizedTarget.startsWith(normalizedBase + sep)) return null;
+  const relativePath = relative(base, target);
+  if (relativePath.startsWith('..') || isAbsolute(relativePath)) return null;
   return target;
 }
 
@@ -420,6 +419,10 @@ export async function downloadPlugin(
   const repoPattern = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
   if (!repoPattern.test(repo)) {
     throw new Error(`仓库格式不合法: ${repo}`);
+  }
+  const branchPattern = /^[a-zA-Z0-9._/-]+$/;
+  if (!branchPattern.test(branch) || branch.includes('..')) {
+    throw new Error(`分支名不合法: ${branch}`);
   }
   const zipUrl = `https://github.com/${repo}/archive/refs/heads/${branch}.zip`;
   const tempDir = join(getFlashClawHome(), 'temp');

@@ -24,14 +24,8 @@ npm install -g flashclaw
 ## 快速开始
 
 ```bash
-# 初始化配置（交互式引导）
-flashclaw init
-
 # 启动服务
 flashclaw start
-
-# 后台运行
-flashclaw start -d
 ```
 
 ## CLI 命令
@@ -41,7 +35,9 @@ flashclaw start -d
 | `flashclaw` | 启动服务（默认） |
 | `flashclaw start` | 启动服务 |
 | `flashclaw version` | 显示版本 |
+| `flashclaw -v` / `flashclaw --version` | 显示版本（快捷方式） |
 | `flashclaw help` | 显示帮助 |
+| `flashclaw -h` / `flashclaw --help` | 显示帮助（快捷方式） |
 | `flashclaw plugins list` | 列出已安装插件 |
 | `flashclaw plugins list --available` | 列出可安装插件 |
 | `flashclaw plugins install <name>` | 安装插件 |
@@ -86,23 +82,25 @@ plugins/
 
 1. 在 `~/.flashclaw/plugins/` 创建文件夹
 2. 添加 `plugin.json` 和 `index.ts`
-3. 重启服务或运行 `flashclaw plugins reload`
+3. 重启服务（开发模式下会自动热加载）
 
 详见 [FLASHCLAW.md](FLASHCLAW.md)
 
 ## 配置
 
-配置文件位于 `~/.flashclaw/.env`（首次运行 `flashclaw init` 自动创建）：
+配置文件位于 `~/.flashclaw/.env`（首次运行自动创建）：
 
 ```bash
 # AI API 配置（三选一）
-# 方式1：Anthropic 官方 API
+# 方式1：Anthropic 官方 API（两者任选其一）
+ANTHROPIC_AUTH_TOKEN=sk-ant-xxx
 ANTHROPIC_API_KEY=sk-ant-xxx
 
 # 方式2：API 代理（如 MiniMax）
 ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
 ANTHROPIC_AUTH_TOKEN=your-token
 AI_MODEL=MiniMax-M2.1
+ANTHROPIC_MODEL=claude-4-5-sonnet-20250929
 
 # 飞书配置
 FEISHU_APP_ID=cli_xxx
@@ -170,7 +168,8 @@ flashclaw/
 │   └── registry.json        # 可安装插件索引
 │
 └── community-plugins/        # 社区/官方扩展插件
-    └── hello-world/         # 测试插件
+    ├── hello-world/         # 测试插件
+    └── web-fetch/           # 网页内容获取
 ```
 
 ## 功能特性

@@ -4,7 +4,7 @@
  */
 
 import { promises as fs, watch, FSWatcher, existsSync, readFileSync } from 'fs';
-import { join, resolve, dirname, delimiter } from 'path';
+import { join, resolve, dirname, delimiter, relative, isAbsolute } from 'path';
 import { createHash } from 'crypto';
 import { createJiti } from 'jiti';
 import { fileURLToPath } from 'url';
@@ -33,7 +33,8 @@ if (existsSync(appNodeModules)) {
     process.env.NODE_PATH = existing.length > 0
       ? `${process.env.NODE_PATH}${delimiter}${appNodeModules}`
       : appNodeModules;
-    Module._initPaths();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (Module as any)._initPaths?.();
   }
 }
 
@@ -250,16 +251,22 @@ export async function loadPlugin(pluginPath: string): Promise<string | null> {
 
   // 动态导入插件模块
   const mainPath = join(absPath, manifest.main);
+  const resolvedMain = resolve(mainPath);
+  const relativeMain = relative(absPath, resolvedMain);
+  if (relativeMain.startsWith('..') || isAbsolute(relativeMain)) {
+    logger.error({ plugin: manifest.name, main: manifest.main }, '插件入口文件路径不安全');
+    return null;
+  }
   
   let pluginModule: { default?: Plugin; create?: () => Plugin };
   try {
     // 优先尝试加载 TS 文件
-    const tsPath = mainPath.replace(/\.js$/, '.ts');
+    const tsPath = resolvedMain.replace(/\.js$/, '.ts');
     try {
       pluginModule = await jiti.import(tsPath) as typeof pluginModule;
     } catch {
       // 如果 TS 不存在，尝试 JS
-      pluginModule = await jiti.import(mainPath) as typeof pluginModule;
+      pluginModule = await jiti.import(resolvedMain) as typeof pluginModule;
     }
   } catch (err) {
     logger.error({ path: mainPath, err }, '导入插件模块失败');

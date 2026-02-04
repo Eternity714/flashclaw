@@ -5,7 +5,7 @@
  */
 
 import pino from 'pino';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, statSync } from 'fs';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { getFlashClawHome } from './paths.js';
@@ -51,11 +51,17 @@ export interface TokenUsage {
 const sessions = new Map<string, SessionData>();
 
 const SESSION_CACHE_PATH = join(getFlashClawHome(), 'cache', 'session-tracker.json');
+const MAX_SESSION_CACHE_BYTES = 10 * 1024 * 1024;
 let persistTimer: NodeJS.Timeout | null = null;
 
 function loadSessionsFromDisk(): void {
   try {
     if (!existsSync(SESSION_CACHE_PATH)) return;
+    const stat = statSync(SESSION_CACHE_PATH);
+    if (stat.size > MAX_SESSION_CACHE_BYTES) {
+      logger.warn({ size: stat.size }, '📊 会话追踪缓存文件过大，跳过加载');
+      return;
+    }
     const content = readFileSync(SESSION_CACHE_PATH, 'utf-8');
     const parsed = JSON.parse(content);
     if (!Array.isArray(parsed)) return;

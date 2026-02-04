@@ -6,6 +6,7 @@
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
+import { isIP } from 'net';
 import pino from 'pino';
 
 import { paths, ensureDirectories, getBuiltinPluginsDir } from './paths.js';
@@ -183,6 +184,10 @@ const WEB_FETCH_URL_RE = /https?:\/\/[^\s<>()]+/i;
 const WEB_FETCH_DOMAIN_RE = /(?:^|[^A-Za-z0-9.-])((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})(:\d{2,5})?(\/[^\s<>()]*)?/i;
 const TRAILING_PUNCT_RE = /[)\],.。，;；!！?？]+$/;
 const MAX_DIRECT_FETCH_CHARS = 4000;
+const MAX_IPC_FILE_BYTES = 1024 * 1024;
+const MAX_IPC_MESSAGE_CHARS = 10000;
+const MAX_IPC_CHAT_ID_CHARS = 256;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 // ==================== 状态管理 ====================
 
@@ -290,6 +295,62 @@ function extractFirstUrl(text: string): string | null {
   return candidate.replace(TRAILING_PUNCT_RE, '');
 }
 
+function isPrivateIpv4(ip: string): boolean {
+  const parts = ip.split('.').map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) return false;
+
+  const [a, b] = parts;
+  if (a === 0) return true;
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  return false;
+}
+
+function isPrivateIpv6(ip: string): boolean {
+  const normalized = ip.toLowerCase();
+  if (normalized === '::' || normalized === '::1') return true;
+  if (normalized.startsWith('fe80:')) return true;
+  if (normalized.startsWith('fec0:')) return true;
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+
+  if (normalized.includes('::ffff:')) {
+    const ipv4Part = normalized.split('::ffff:')[1];
+    if (ipv4Part && isPrivateIpv4(ipv4Part)) return true;
+  }
+
+  return false;
+}
+
+function isPrivateIp(ip: string): boolean {
+  const family = isIP(ip);
+  if (family === 4) return isPrivateIpv4(ip);
+  if (family === 6) return isPrivateIpv6(ip);
+  return false;
+}
+
+function isBlockedHostname(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+  if (normalized === 'localhost') return true;
+  return (
+    normalized.endsWith('.localhost') ||
+    normalized.endsWith('.local') ||
+    normalized.endsWith('.internal')
+  );
+}
+
+function estimateBase64Bytes(content: string): number | null {
+  if (!content) return null;
+  const raw = content.startsWith('data:') ? content.split(',')[1] ?? '' : content;
+  const normalized = raw.replace(/\s+/g, '');
+  if (!normalized) return 0;
+  const padding = normalized.endsWith('==') ? 2 : normalized.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
+}
+
 function truncateText(text: string, maxLength: number): { text: string; truncated: boolean } {
   if (text.length <= maxLength) {
     return { text, truncated: false };
@@ -340,6 +401,26 @@ async function tryHandleDirectWebFetch(msg: Message, group: RegisteredGroup): Pr
   const url = extractFirstUrl(content);
   if (!url) return false;
 
+  let urlObj: URL;
+  try {
+    urlObj = new URL(url);
+  } catch {
+    await sendMessage(msg.chatId, `${BOT_NAME}: URL 格式不合法`, msg.platform);
+    return true;
+  }
+
+  if (!['http:', 'https:'].includes(urlObj.protocol)) {
+    await sendMessage(msg.chatId, `${BOT_NAME}: 只支持 HTTP/HTTPS 协议`, msg.platform);
+    return true;
+  }
+
+  const allowPrivate = process.env.WEB_FETCH_ALLOW_PRIVATE === '1';
+  const hostname = urlObj.hostname;
+  if (!allowPrivate && (isBlockedHostname(hostname) || (isIP(hostname) && isPrivateIp(hostname)))) {
+    await sendMessage(msg.chatId, `${BOT_NAME}: 目标地址禁止访问内网`, msg.platform);
+    return true;
+  }
+
   const tool = pluginManager.getTool(WEB_FETCH_TOOL_NAME);
   if (!tool) {
     await sendMessage(msg.chatId, `${BOT_NAME}: 未检测到 web_fetch 插件，请先安装后再使用。`, msg.platform);
@@ -355,16 +436,17 @@ async function tryHandleDirectWebFetch(msg: Message, group: RegisteredGroup): Pr
     }
   };
 
-  logger.info({ chatId: msg.chatId, url }, '⚡ 触发直接网页抓取');
+  const normalizedUrl = urlObj.toString();
+  logger.info({ chatId: msg.chatId, url: normalizedUrl }, '⚡ 触发直接网页抓取');
 
   let result: { success: boolean; data?: unknown; error?: string };
   try {
-    result = await tool.execute({ url }, toolContext);
+    result = await tool.execute({ url: normalizedUrl, allowPrivate }, toolContext);
   } catch (error) {
     result = { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 
-  const response = formatDirectWebFetchResponse(url, result);
+  const response = formatDirectWebFetchResponse(normalizedUrl, result);
   await sendMessage(msg.chatId, `${BOT_NAME}: ${response}`, msg.platform);
   return true;
 }
@@ -403,7 +485,8 @@ async function processQueuedMessage(queuedMsg: QueuedMessage<Message>): Promise<
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 
   // 构建带历史上下文的 prompt
   let prompt = '';
@@ -423,6 +506,15 @@ async function processQueuedMessage(queuedMsg: QueuedMessage<Message>): Promise<
   // 提取图片附件（只处理当前消息的附件）
   const imageAttachments = msg.attachments
     ?.filter(a => a.type === 'image' && a.content)
+    .filter(a => {
+      const size = estimateBase64Bytes(a.content || '');
+      if (size === null) return false;
+      if (size > MAX_IMAGE_BYTES) {
+        logger.warn({ chatId, size }, '附件过大，已忽略');
+        return false;
+      }
+      return true;
+    })
     .map(a => ({
       type: 'image' as const,
       content: a.content!,
@@ -777,6 +869,19 @@ async function sendMessage(chatId: string, text: string, platform?: string): Pro
 }
 
 // ==================== IPC 处理 ====================
+function quarantineIpcFile(ipcBaseDir: string, sourceGroup: string, filePath: string, reason: string, err?: unknown): void {
+  const errorDir = path.join(ipcBaseDir, 'errors');
+  const fileName = path.basename(filePath);
+  try {
+    fs.mkdirSync(errorDir, { recursive: true });
+    fs.renameSync(filePath, path.join(errorDir, `${sourceGroup}-${fileName}`));
+  } catch (moveError) {
+    logger.warn({ file: fileName, sourceGroup, moveError }, '隔离 IPC 文件失败');
+    return;
+  }
+  logger.warn({ file: fileName, sourceGroup, reason, err }, 'IPC 文件已隔离');
+}
+
 function startIpcWatcher(): void {
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
@@ -806,8 +911,23 @@ function startIpcWatcher(): void {
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
             try {
+              const stat = fs.statSync(filePath);
+              if (stat.size > MAX_IPC_FILE_BYTES) {
+                quarantineIpcFile(ipcBaseDir, sourceGroup, filePath, `IPC 消息文件过大 (${stat.size} bytes)`);
+                continue;
+              }
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               if (data.type === 'message' && data.chatJid && data.text) {
+                if (typeof data.chatJid !== 'string' || data.chatJid.length > MAX_IPC_CHAT_ID_CHARS) {
+                  logger.warn({ sourceGroup }, 'IPC 消息 chatJid 格式不合法');
+                  fs.unlinkSync(filePath);
+                  continue;
+                }
+                if (typeof data.text !== 'string' || data.text.length > MAX_IPC_MESSAGE_CHARS) {
+                  logger.warn({ sourceGroup }, 'IPC 消息 text 过长或格式不合法');
+                  fs.unlinkSync(filePath);
+                  continue;
+                }
                 const targetGroup = registeredGroups[data.chatJid];
                 if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
                   await sendMessage(data.chatJid, `${BOT_NAME}: ${data.text}`);
@@ -819,9 +939,7 @@ function startIpcWatcher(): void {
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error({ file, sourceGroup, err }, '处理 IPC 消息失败');
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(filePath, path.join(errorDir, `${sourceGroup}-${file}`));
+              quarantineIpcFile(ipcBaseDir, sourceGroup, filePath, '处理 IPC 消息失败', err);
             }
           }
         }
@@ -836,14 +954,17 @@ function startIpcWatcher(): void {
           for (const file of taskFiles) {
             const filePath = path.join(tasksDir, file);
             try {
+              const stat = fs.statSync(filePath);
+              if (stat.size > MAX_IPC_FILE_BYTES) {
+                quarantineIpcFile(ipcBaseDir, sourceGroup, filePath, `IPC 任务文件过大 (${stat.size} bytes)`);
+                continue;
+              }
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               await processTaskIpc(data, sourceGroup, isMain);
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error({ file, sourceGroup, err }, '处理 IPC 任务失败');
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(filePath, path.join(errorDir, `${sourceGroup}-${file}`));
+              quarantineIpcFile(ipcBaseDir, sourceGroup, filePath, '处理 IPC 任务失败', err);
             }
           }
         }
