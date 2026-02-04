@@ -30,7 +30,8 @@ flashclaw start
 
 ## 更新日志
 
-详见 [CHANGELOG.md](CHANGELOG.md)
+- [CHANGELOG.md](CHANGELOG.md)
+- GitHub Releases: https://github.com/GuLu9527/flashclaw/releases
 
 ## CLI 命令
 
