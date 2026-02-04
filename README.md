@@ -44,6 +44,8 @@ flashclaw start
 | `flashclaw plugins uninstall <name>` | 卸载插件 |
 | `flashclaw plugins update <name>` | 更新插件 |
 | `flashclaw plugins update --all` | 更新所有插件 |
+| `flashclaw config list-backups` | 列出配置备份 |
+| `flashclaw config restore [n]` | 恢复配置备份（n=1-5） |
 
 **安装插件示例：**
 
@@ -88,7 +90,12 @@ plugins/
 
 ## 配置
 
-配置文件位于 `~/.flashclaw/.env`（首次运行自动创建）：
+配置文件位于 `~/.flashclaw/.env`（首次运行自动创建）。
+
+**特性：**
+- 支持环境变量替换：`${VAR}` 或 `${VAR:-default}`
+- 自动备份：每次修改前自动保存备份（最多 5 个）
+- 使用 `flashclaw config restore` 恢复误操作
 
 ```bash
 # AI API 配置（三选一）
