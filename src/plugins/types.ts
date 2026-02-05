@@ -14,6 +14,7 @@ export interface ToolContext {
   groupId: string;
   userId: string;  // 用户 ID，用于用户级别记忆
   sendMessage: (content: string) => Promise<void>;
+  sendImage: (imageData: string, caption?: string) => Promise<void>;  // 发送图片（data URL 或 base64）
 }
 
 // 工具执行结果

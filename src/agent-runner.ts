@@ -139,6 +139,18 @@ export function createToolExecutor(ctx: IpcContext, memoryManager: MemoryManager
         timestamp: new Date().toISOString()
       };
       writeIpcFile(MESSAGES_DIR, data);
+    },
+    sendImage: async (imageData: string, caption?: string) => {
+      // 通过 IPC 发送图片到当前聊天
+      const data = {
+        type: 'image',
+        chatJid,
+        imageData,
+        caption,
+        groupFolder,
+        timestamp: new Date().toISOString()
+      };
+      writeIpcFile(MESSAGES_DIR, data);
     }
   };
 
@@ -298,6 +310,15 @@ function getGroupSystemPrompt(group: RegisteredGroup, isMain: boolean, isSchedul
 
 ## 可用工具
 ${toolsList}
+
+## 发送截图（重要！）
+截图后必须使用 send_message 工具发送给用户：
+\`\`\`
+send_message({ image: "latest_screenshot", caption: "可选的说明文字" })
+\`\`\`
+- 先用 browser_action screenshot 截图
+- 然后用 send_message image="latest_screenshot" 发送
+- 不要只描述截图，要实际发送！
 
 ## schedule_task 时间计算（重要！）
 创建一次性任务时，scheduleValue 必须使用 ISO 8601 格式。

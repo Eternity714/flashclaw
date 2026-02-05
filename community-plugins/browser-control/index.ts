@@ -53,6 +53,28 @@ let browserInstance: BrowserInstance | null = null;
 /** 全局 CDP URL */
 let globalCdpUrl: string | null = null;
 
+/** 最近一次截图的临时文件路径（供 send_message 引用） */
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'fs';
+
+const LATEST_SCREENSHOT_PATH = join(tmpdir(), 'flashclaw-latest-screenshot.txt');
+
+/** 保存最近截图到临时文件 */
+function saveLatestScreenshot(base64: string): void {
+  writeFileSync(LATEST_SCREENSHOT_PATH, base64, 'utf-8');
+}
+
+/** 获取最近截图（从临时文件读取） */
+export function getLatestScreenshot(): string | null {
+  if (!existsSync(LATEST_SCREENSHOT_PATH)) return null;
+  try {
+    return readFileSync(LATEST_SCREENSHOT_PATH, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
 // ============================================================================
 // 工具参数类型
 // ============================================================================
@@ -518,13 +540,18 @@ async function executeAction(params: BrowserActionParams): Promise<ToolResult> {
           fullPage: params.fullPage,
           path: params.path,
         });
+        const base64 = buffer.toString('base64');
+        // 存储到临时文件，供 send_message 引用
+        saveLatestScreenshot(base64);
         return {
           success: true,
           data: {
             action: 'screenshot',
             size: buffer.length,
             path: params.path,
-            base64: buffer.toString('base64'),
+            // 不返回完整 base64 给 Claude，避免上下文过大
+            // 使用 send_message({ image: "latest_screenshot" }) 发送截图
+            hint: '截图已保存。使用 send_message 工具发送：send_message({ image: "latest_screenshot", caption: "可选说明" })',
           },
         };
       }

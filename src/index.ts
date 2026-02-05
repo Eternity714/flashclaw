@@ -158,6 +158,33 @@ class ChannelManager {
     }
   }
   
+  async sendImage(chatId: string, imageData: string, caption?: string, platform?: string): Promise<SendMessageResult> {
+    // 如果指定了平台，使用指定的渠道
+    if (platform) {
+      const channel = this.channels.find(c => c.name === platform);
+      if (channel?.sendImage) {
+        return await channel.sendImage(chatId, imageData, caption);
+      }
+      // 渠道不支持发送图片，降级为发送文本提示
+      logger.warn({ platform, chatId }, '渠道不支持发送图片，已降级');
+      return await this.sendMessage(chatId, caption || '[图片无法显示]', platform);
+    }
+    // 尝试所有支持图片的渠道
+    for (const channel of this.channels) {
+      if (channel.sendImage) {
+        try {
+          return await channel.sendImage(chatId, imageData, caption);
+        } catch (err) {
+          logger.debug({ channel: channel.name, chatId, err }, '渠道发送图片失败，尝试下一个');
+          continue;
+        }
+      }
+    }
+    // 所有渠道都不支持，降级为文本
+    logger.warn({ chatId }, '没有渠道支持发送图片，已降级');
+    return await this.sendMessage(chatId, caption || '[图片无法显示]', platform);
+  }
+  
   getEnabledPlatforms(): string[] {
     return this.enabledPlatforms;
   }
@@ -445,6 +472,9 @@ async function tryHandleDirectWebFetch(msg: Message, group: RegisteredGroup): Pr
     userId: msg.senderId,
     sendMessage: async (text: string) => {
       await sendMessage(msg.chatId, `${BOT_NAME}: ${text}`, msg.platform);
+    },
+    sendImage: async (imageData: string, caption?: string) => {
+      await channelManager.sendImage(msg.chatId, imageData, caption, msg.platform);
     }
   };
 
@@ -956,6 +986,26 @@ function startIpcWatcher(): void {
                   logger.info({ chatId: data.chatJid, sourceGroup }, 'IPC 消息已发送');
                 } else {
                   logger.warn({ chatId: data.chatJid, sourceGroup }, '未授权的 IPC 消息被阻止');
+                }
+              } else if (data.type === 'image' && data.chatJid && data.imageData) {
+                // 处理图片消息
+                if (typeof data.chatJid !== 'string' || data.chatJid.length > MAX_IPC_CHAT_ID_CHARS) {
+                  logger.warn({ sourceGroup }, 'IPC 图片消息 chatJid 格式不合法');
+                  fs.unlinkSync(filePath);
+                  continue;
+                }
+                if (typeof data.imageData !== 'string') {
+                  logger.warn({ sourceGroup }, 'IPC 图片消息 imageData 格式不合法');
+                  fs.unlinkSync(filePath);
+                  continue;
+                }
+                const targetGroup = registeredGroups[data.chatJid];
+                if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
+                  const caption = data.caption ? `${BOT_NAME}: ${data.caption}` : undefined;
+                  await channelManager.sendImage(data.chatJid, data.imageData, caption);
+                  logger.info({ chatId: data.chatJid, sourceGroup }, 'IPC 图片已发送');
+                } else {
+                  logger.warn({ chatId: data.chatJid, sourceGroup }, '未授权的 IPC 图片被阻止');
                 }
               }
               fs.unlinkSync(filePath);
