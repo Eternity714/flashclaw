@@ -301,6 +301,35 @@ FlashClaw 的 AI Agent 直接在本机运行，**可以访问所有文件和执�
 - [安全模型](docs/SECURITY.md) - 安全说明
 - [贡献指南](CONTRIBUTING.md) - 如何贡献
 
+## 贡献者
+
+感谢以下贡献者让 FlashClaw 变得更好：
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/GuLu9527">
+        <img src="https://avatars.githubusercontent.com/u/109549160?v=4" width="80px;" alt="GuLu9527"/>
+        <br />
+        <sub><b>GuLu9527</b></sub>
+      </a>
+      <br />
+      <sub>创建者 & 维护者</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/Eternity714">
+        <img src="https://avatars.githubusercontent.com/u/10277887?v=4" width="80px;" alt="Eternity714"/>
+        <br />
+        <sub><b>Eternity714</b></sub>
+      </a>
+      <br />
+      <sub>Windows 中文支持 & 错误处理优化</sub>
+    </td>
+  </tr>
+</table>
+
+想要贡献？查看 [贡献指南](CONTRIBUTING.md)！
+
 ## 许可证
 
 MIT
