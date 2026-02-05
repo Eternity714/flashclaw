@@ -699,7 +699,7 @@ function getCurrentModelId(): string;
 | `FLASHCLAW_HOME` | 数据与配置根目录 | `~/.flashclaw` |
 | `LOG_LEVEL` | 日志级别 | `info` |
 | `BOT_NAME` | 机器人名称 | `FlashClaw` |
-| `TIMEZONE` | 时区 | `Asia/Shanghai` |
+| `TIMEZONE` | 时区 | 系统时区 |
 | `AGENT_TIMEOUT` | Agent 超时(ms) | `300000` |
 | `HEALTH_PORT` | 健康检查端口（0=禁用） | `9090` |
 | `THINKING_THRESHOLD_MS` | "正在思考..." 提示阈值(ms) | `0` |

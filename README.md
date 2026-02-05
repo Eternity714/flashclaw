@@ -180,10 +180,21 @@ flashclaw/
 │
 └── community-plugins/        # 社区/官方扩展插件
     ├── hello-world/         # 测试插件
-    └── web-fetch/           # 网页内容获取
+    ├── web-fetch/           # 网页内容获取
+    ├── browser-control/     # 浏览器自动化控制
+    └── web-ui/              # Web 管理界面
 ```
 
 > community-plugins 作为扩展插件库示例，默认不随 npm 包发布，可通过插件安装命令单独获取。
+
+### 社区插件说明
+
+| 插件 | 说明 |
+|------|------|
+| hello-world | 测试插件，用于验证插件系统 |
+| web-fetch | 网页内容获取，支持抓取网页并转为文本 |
+| browser-control | 浏览器自动化控制（基于 Playwright） |
+| web-ui | Web 管理界面，实时监控与管理（端口 3000）|
 
 ## 功能特性
 

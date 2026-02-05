@@ -144,6 +144,7 @@ FlashClaw 采用乐高式插件架构：
 - 任务作为完整代理在创建它们的群组上下文中运行
 - 任务可以使用 `send_message` 工具向群组发送消息，或静默完成
 - 调度类型：cron 表达式、间隔（毫秒）或一次性（ISO 时间戳）
+- **精确定时器**：按需唤醒，非固定轮询，资源占用低
 
 ### 模型能力检测
 
@@ -174,7 +175,7 @@ FlashClaw 自动检测 AI 模型的能力：
 - 工具插件提供调度能力
 - 工具：`schedule_task`、`list_tasks`、`cancel_task`、`pause_task`、`resume_task`、`send_message`
 - 任务存储在 SQLite，包含运行历史
-- 调度器循环每分钟检查到期任务
+- 调度器使用精确定时器按需唤醒
 
 ### "正在思考" 提示
 
@@ -187,27 +188,20 @@ FlashClaw 自动检测 AI 模型的能力：
 
 ## 设置和自定义
 
-### CLI 初始化
+### 配置
 
-```bash
-flashclaw init
-```
-
-交互式引导配置：
-- 选择消息平台（飞书）
-- 输入应用凭证
-- 设置机器人名称
+在 `~/.flashclaw/.env` 中配置 API 密钥和平台凭证（首次运行自动创建）。
 
 ### 添加新功能
 
-1. 在 `plugins/` 创建插件目录
+1. 在 `~/.flashclaw/plugins/` 创建插件目录
 2. 添加 `plugin.json` 和 `index.ts`
-3. 运行 `flashclaw plugins reload`
+3. 重启服务加载插件
 
 ### 部署
 
-- 通过 `flashclaw start -d` 后台运行
-- 或使用 PM2、systemd、launchd 管理
+- 前台运行：`flashclaw start`
+- 后台运行：使用 PM2、systemd、launchd 管理
 
 ---
 

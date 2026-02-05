@@ -60,7 +60,7 @@ flashclaw/
 1. 在 `plugins/` 目录创建文件夹
 2. 添加 `plugin.json` 清单文件
 3. 添加 `index.ts` 入口文件
-4. 运行 `flashclaw plugins reload` 或重启服务
+4. 重启服务加载新插件
 
 ### plugin.json 格式
 
@@ -366,17 +366,18 @@ npm run build        # 编译 TypeScript
 npm run typecheck    # 类型检查
 
 # CLI
-flashclaw init          # 初始化配置
-flashclaw start         # 启动服务
-flashclaw start -d      # 后台启动
-flashclaw stop          # 停止服务
-flashclaw restart       # 重启服务
-flashclaw status        # 查看状态
-flashclaw plugins list  # 列出插件
-flashclaw plugins reload # 热重载插件
-flashclaw config list   # 列出配置
-flashclaw logs          # 查看日志
-flashclaw logs -f       # 实时日志
+flashclaw                          # 启动服务（默认）
+flashclaw start                    # 启动服务
+flashclaw version                  # 显示版本
+flashclaw help                     # 显示帮助
+flashclaw plugins list             # 列出已安装插件
+flashclaw plugins list --available # 列出可安装插件
+flashclaw plugins install <name>   # 安装插件
+flashclaw plugins uninstall <name> # 卸载插件
+flashclaw plugins update <name>    # 更新插件
+flashclaw plugins update --all     # 更新所有插件
+flashclaw config list-backups      # 列出配置备份
+flashclaw config restore [n]       # 恢复配置备份（n=1-5）
 ```
 
 ---
@@ -389,11 +390,9 @@ flashclaw logs -f       # 实时日志
 LOG_LEVEL=debug npm run dev
 ```
 
-### 查看实时日志
+### 查看日志
 
-```bash
-flashclaw logs -f
-```
+日志输出在终端（前台运行时）或 `~/.flashclaw/logs/flashclaw.log`。
 
 ### 常见问题
 

@@ -162,6 +162,12 @@ flashclaw/
 │       ├── plugin.json
 │       └── index.ts
 │
+├── community-plugins/             # 社区/官方扩展插件
+│   ├── hello-world/              # 测试插件
+│   ├── web-fetch/                # 网页内容获取
+│   ├── browser-control/          # 浏览器自动化控制
+│   └── web-ui/                   # Web 管理界面
+│
 ├── groups/                        # 群组记忆
 │   ├── global/
 │   │   └── CLAUDE.md              # 全局记忆（所有群组读取）
@@ -387,7 +393,7 @@ FlashClaw 有一个内置调度器，在群组上下文中作为完整代理运�
 
 | 特性 | 说明 |
 |------|------|
-| **精确定时器** | 按需唤醒，计算精确的下次执行时间，不再固定轮询 |
+| **精确定时器** | 按需唤醒，计算精确的下次执行时间（非轮询） |
 | **并发控制** | 最多同时执行 3 个任务，使用 p-limit 控制 |
 | **超时保护** | 默认 5 分钟超时，可通过 timeoutMs 参数配置 |
 | **自动重试** | 失败任务自动重试，指数退避策略（1分钟→2分钟→4分钟...） |
@@ -438,36 +444,31 @@ retryDelay = min(
 
 ## CLI
 
-FlashClaw 提供完整的 CLI 工具。
+FlashClaw 提供 CLI 工具管理服务和插件。
 
 ### 命令结构
 
 ```
 flashclaw
-├── init           # 交互式初始化配置
-├── start          # 启动服务
-│   └── -d         # 后台守护进程
-├── stop           # 停止服务
-├── restart        # 重启服务
-├── status         # 查看状态
+├── start                      # 启动服务（默认命令）
+├── version                    # 显示版本
+├── help                       # 显示帮助
 ├── plugins
-│   ├── list       # 列出插件
-│   └── reload     # 热重载插件
-├── config
-│   ├── list       # 列出配置
-│   ├── get        # 获取配置
-│   └── set        # 设置配置
-└── logs           # 查看日志
-    └── -f         # 实时跟踪
+│   ├── list                   # 列出已安装插件
+│   ├── list --available       # 列出可安装插件
+│   ├── install <name>         # 安装插件
+│   ├── uninstall <name>       # 卸载插件
+│   ├── update <name>          # 更新插件
+│   └── update --all           # 更新所有插件
+└── config
+    ├── list-backups           # 列出配置备份
+    └── restore [n]            # 恢复配置备份（n=1-5）
 ```
 
 ### CLI 特性
 
-- **交互式初始化**：引导配置消息平台
-- **后台运行**：支持守护进程模式
-- **热重载**：运行时重载插件
-- **配置管理**：敏感信息自动脱敏
-- **日志查看**：支持实时跟踪
+- **插件管理**：安装、卸载、更新插件
+- **配置备份**：自动备份配置，支持恢复
 
 ---
 
@@ -498,20 +499,9 @@ pm2 startup
 
 ### 服务管理
 
-**查看状态：**
-```bash
-flashclaw status
-```
-
-**查看日志：**
-```bash
-flashclaw logs -f
-```
-
-**重启服务：**
-```bash
-flashclaw restart
-```
+- **前台运行**：`flashclaw start`（Ctrl+C 停止）
+- **后台运行**：使用 PM2、systemd 等进程管理器
+- **查看日志**：终端输出或 `~/.flashclaw/logs/flashclaw.log`
 
 ---
 
@@ -550,7 +540,7 @@ FlashClaw 设计为个人助手，AI 代理直接在宿主机上运行：
 
 | 问题 | 原因 | 解决方案 |
 |------|------|----------|
-| 消息无响应 | 服务未运行 | `flashclaw status` 检查 |
+| 消息无响应 | 服务未运行 | 检查终端是否有 FlashClaw 进程 |
 | 图片不支持 | 模型限制 | 检查 AI_MODEL 是否支持图片 |
 | 插件加载失败 | 语法错误 | `npm run typecheck` 检查 |
 | 热重载无效 | 渠道插件 | 渠道插件会完整重启连接 |
