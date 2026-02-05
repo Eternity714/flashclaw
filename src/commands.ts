@@ -256,7 +256,8 @@ function handleTasks(context: CommandContext): CommandResult {
   
   for (const task of tasks) {
     const statusIcon = task.status === 'active' ? '🟢' : 
-                       task.status === 'paused' ? '⏸️' : '⚪';
+                       task.status === 'paused' ? '⏸️' : 
+                       task.status === 'failed' ? '❌' : '⚪';
     tasksText += `${statusIcon} **${task.id.slice(-6)}**\n`;
     tasksText += `   ${task.prompt.slice(0, 50)}${task.prompt.length > 50 ? '...' : ''}\n`;
     if (task.nextRun) {

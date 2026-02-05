@@ -348,9 +348,12 @@ export function resetTaskRetry(id: string): void {
 
 export function updateTaskAfterRun(id: string, nextRun: string | null, lastResult: string): void {
   const now = new Date().toISOString();
+  // 只有当 next_run 为 NULL 且当前状态是 'active' 时才自动设为 'completed'
+  // 避免覆盖已设置的 'failed' 状态
   getDb().prepare(`
     UPDATE scheduled_tasks
-    SET next_run = ?, last_run = ?, last_result = ?, status = CASE WHEN ? IS NULL THEN 'completed' ELSE status END
+    SET next_run = ?, last_run = ?, last_result = ?, 
+        status = CASE WHEN ? IS NULL AND status = 'active' THEN 'completed' ELSE status END
     WHERE id = ?
   `).run(nextRun, now, lastResult, nextRun, id);
 }

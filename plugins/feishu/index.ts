@@ -137,14 +137,51 @@ function fileToDataUrl(filePath: string, mimeType: string): string {
   return `data:${mimeType};base64,${b64}`;
 }
 
+type ResponseField = 'message_id' | 'image_key' | 'file_key';
+
+type ClosableWsClient = lark.WSClient & {
+  close: () => Promise<void> | void;
+};
+
+function hasCloseMethod(client: lark.WSClient): client is ClosableWsClient {
+  return typeof (client as { close?: unknown }).close === 'function';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object';
+}
+
+function extractResponseData(value: unknown): unknown {
+  if (isRecord(value) && 'data' in value) {
+    return (value as { data?: unknown }).data;
+  }
+  return value;
+}
+
+function getResponseStringField(response: unknown, field: ResponseField): string | undefined {
+  const data = extractResponseData(response);
+  if (!isRecord(data)) return undefined;
+  const candidate = data[field];
+  return typeof candidate === 'string' ? candidate : undefined;
+}
+
+function isNodeReadableStream(value: unknown): value is NodeJS.ReadableStream {
+  return isRecord(value) && typeof value.pipe === 'function';
+}
+
+function isWebReadableStream(value: unknown): boolean {
+  return isRecord(value) && typeof value.getReader === 'function';
+}
+
 /**
  * 将流转换为 Node.js 可读流
  */
-function toNodeReadableStream(maybeStream: any): Readable | null {
+function toNodeReadableStream(maybeStream: unknown): Readable | null {
   if (!maybeStream) return null;
-  if (typeof maybeStream.pipe === 'function') return maybeStream;
-  if (typeof maybeStream.getReader === 'function' && typeof Readable.fromWeb === 'function') {
-    return Readable.fromWeb(maybeStream as any);
+  if (isNodeReadableStream(maybeStream)) return maybeStream;
+  if (isWebReadableStream(maybeStream) && typeof Readable.fromWeb === 'function') {
+    const webStream = maybeStream as unknown as Parameters<typeof Readable.fromWeb>[0];
+    return Readable.fromWeb(webStream);
   }
   return null;
 }
@@ -260,6 +297,28 @@ class FeishuChannelPlugin implements ChannelPlugin {
 
   async stop(): Promise<void> {
     this.running = false;
+    
+    // 关闭 WebSocket 客户端
+    // 注意：@larksuiteoapi/node-sdk 的 WSClient 没有暴露显式的 close 方法
+    // 通过释放引用让垃圾回收器清理底层连接
+    if (this.wsClient) {
+      // 尝试调用 close 方法（如果存在）
+      if (hasCloseMethod(this.wsClient)) {
+        try {
+          await this.wsClient.close();
+        } catch (err) {
+          logger.debug({ err, plugin: this.name }, 'WSClient.close() 调用失败');
+        }
+      }
+      this.wsClient = null;
+    }
+    
+    // 清理 HTTP 客户端引用
+    this.client = null;
+    
+    // 清理消息去重缓存
+    this.seenMessages.clear();
+    
     logger.info({ plugin: this.name }, '飞书插件已停止');
   }
 
@@ -296,7 +355,7 @@ class FeishuChannelPlugin implements ChannelPlugin {
         },
       });
 
-      const messageId = (res as any)?.data?.message_id;
+      const messageId = getResponseStringField(res, 'message_id');
       logger.info({ chatId, length: content.length, plugin: this.name }, '消息发送成功');
       return { success: true, messageId };
     } catch (err: any) {
@@ -377,7 +436,7 @@ class FeishuChannelPlugin implements ChannelPlugin {
         },
       });
 
-      const imageKey = (uploadRes as any)?.data?.image_key || (uploadRes as any)?.image_key;
+      const imageKey = getResponseStringField(uploadRes, 'image_key');
       if (!imageKey) {
         throw new Error('上传图片失败：未获取到 image_key');
       }
@@ -402,7 +461,7 @@ class FeishuChannelPlugin implements ChannelPlugin {
         try { fs.unlinkSync(imagePath); } catch {}
       }
 
-      const messageId = (sendRes as any)?.data?.message_id;
+      const messageId = getResponseStringField(sendRes, 'message_id');
       logger.info({ chatId, plugin: this.name }, '图片发送成功');
       return { success: true, messageId };
     } catch (err: any) {
@@ -421,8 +480,8 @@ class FeishuChannelPlugin implements ChannelPlugin {
       const ext = path.extname(filePath).toLowerCase().replace('.', '');
 
       // 根据文件类型选择上传方式
-      let fileType: string;
-      let msgType: string;
+      let fileType: 'stream' | 'mp4' | 'opus';
+      let msgType: 'file' | 'media' | 'audio';
 
       if (isImagePath(filePath)) {
         // 图片走 sendImage
@@ -440,13 +499,13 @@ class FeishuChannelPlugin implements ChannelPlugin {
 
       const uploadRes = await this.client.im.file.create({
         data: {
-          file_type: fileType as any,
+          file_type: fileType,
           file_name: actualFileName,
           file: fs.createReadStream(filePath),
         },
       });
 
-      const fileKey = (uploadRes as any)?.data?.file_key || (uploadRes as any)?.file_key;
+      const fileKey = getResponseStringField(uploadRes, 'file_key');
       if (!fileKey) {
         throw new Error('上传文件失败：未获取到 file_key');
       }
@@ -460,7 +519,7 @@ class FeishuChannelPlugin implements ChannelPlugin {
         },
       });
 
-      const messageId = (sendRes as any)?.data?.message_id;
+      const messageId = getResponseStringField(sendRes, 'message_id');
       logger.info({ chatId, fileName: actualFileName, plugin: this.name }, '文件发送成功');
       return { success: true, messageId };
     } catch (err: any) {
@@ -501,8 +560,7 @@ class FeishuChannelPlugin implements ChannelPlugin {
         params: { type: 'image' },
       });
 
-      const data = response as any;
-      const payload = (data && typeof data === 'object' && 'data' in data) ? data.data : data;
+      const payload = extractResponseData(response);
 
       // 处理不同的响应格式
       if (payload && typeof payload.writeFile === 'function') {
@@ -521,7 +579,7 @@ class FeishuChannelPlugin implements ChannelPlugin {
       } else if (payload instanceof ArrayBuffer) {
         fs.writeFileSync(tmpPath, Buffer.from(payload));
       } else {
-        throw new Error(`未知响应类型: ${typeof data}`);
+        throw new Error(`未知响应类型: ${typeof payload}`);
       }
 
       // 大小检查
@@ -552,7 +610,7 @@ class FeishuChannelPlugin implements ChannelPlugin {
 
   // ─── 文件下载 ───────────────────────────────────────────────────
 
-  private async downloadFile(messageId: string, fileKey: string, fileName: string, type: string = 'file'): Promise<string | null> {
+  private async downloadFile(messageId: string, fileKey: string, fileName: string, type: 'file' | 'image' = 'file'): Promise<string | null> {
     if (!this.client) return null;
 
     const ext = path.extname(fileName || '') || '.bin';
@@ -561,11 +619,10 @@ class FeishuChannelPlugin implements ChannelPlugin {
     try {
       const response = await this.client.im.messageResource.get({
         path: { message_id: messageId, file_key: fileKey },
-        params: { type: type as any },
+        params: { type },
       });
 
-      const data = response as any;
-      const payload = (data && typeof data === 'object' && 'data' in data) ? data.data : data;
+      const payload = extractResponseData(response);
 
       if (payload && typeof payload.writeFile === 'function') {
         await payload.writeFile(tmpPath);
@@ -581,7 +638,7 @@ class FeishuChannelPlugin implements ChannelPlugin {
       } else if (Buffer.isBuffer(payload)) {
         fs.writeFileSync(tmpPath, payload);
       } else {
-        throw new Error(`未知响应类型: ${typeof data}`);
+        throw new Error(`未知响应类型: ${typeof payload}`);
       }
 
       // 大小检查

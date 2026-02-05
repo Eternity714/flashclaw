@@ -24,7 +24,15 @@ import {
   updateTask
 } from './db.js';
 import { ScheduledTask, RegisteredGroup } from './types.js';
-import { GROUPS_DIR, MAIN_GROUP_FOLDER, TIMEZONE } from './config.js';
+import { 
+  MAIN_GROUP_FOLDER, 
+  TIMEZONE, 
+  MAX_CONCURRENT_TASKS, 
+  DEFAULT_TASK_TIMEOUT_MS, 
+  RETRY_BASE_DELAY_MS, 
+  MAX_RETRY_DELAY_MS 
+} from './config.js';
+import { paths } from './paths.js';
 import { runAgent, writeTasksSnapshot } from './agent-runner.js';
 import { createLogger } from './logger.js';
 
@@ -32,20 +40,8 @@ const logger = createLogger('TaskScheduler');
 
 // ==================== 配置常量 ====================
 
-/** 最大并发任务数 */
-const MAX_CONCURRENT_TASKS = 3;
-
-/** 默认任务超时时间（5 分钟） */
-const DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1000;
-
 /** 最大定时器延迟（避免 Node.js 的 32 位整数溢出） */
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
-
-/** 重试基础延迟（1 分钟） */
-const RETRY_BASE_DELAY_MS = 60 * 1000;
-
-/** 最大重试延迟（1 小时） */
-const MAX_RETRY_DELAY_MS = 60 * 60 * 1000;
 
 // ==================== 类型定义 ====================
 
@@ -268,7 +264,7 @@ async function runTaskWithTimeout(
  * 任务执行核心逻辑
  */
 async function runTaskCore(task: ScheduledTask, deps: SchedulerDependencies): Promise<string> {
-  const groupDir = path.join(GROUPS_DIR, task.group_folder);
+  const groupDir = path.join(paths.groups(), task.group_folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
   const groups = deps.registeredGroups();
@@ -332,9 +328,9 @@ async function handleTaskFailure(task: ScheduledTask, error: string): Promise<vo
     // 达到最大重试次数
     logger.error({ taskId: task.id, retryCount: currentRetry }, '任务达到最大重试次数，标记为失败');
     
-    // 对于 once 类型任务，标记为 completed（已完成但失败）
+    // 对于 once 类型任务，标记为 failed（明确区分成功完成和失败）
     if (task.schedule_type === 'once') {
-      updateTask(task.id, { status: 'completed' });
+      updateTask(task.id, { status: 'failed' });
       updateTaskAfterRun(task.id, null, `Error after ${currentRetry} retries: ${error}`);
     } else {
       // 对于重复任务，重置重试计数并调度下一次正常执行

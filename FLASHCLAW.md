@@ -144,8 +144,7 @@ interface ToolContext {
   chatId: string;        // 当前聊天 ID
   groupId: string;       // 群组文件夹名（同 groupFolder）
   userId: string;        // 用户 ID（用于用户级别记忆）
-  isMain: boolean;       // 是否为主群组
-  sendMessage: (chatId: string, content: string) => Promise<void>;  // 发送消息
+  sendMessage: (content: string) => Promise<void>;  // 发送消息到当前聊天
 }
 ```
 
@@ -154,27 +153,19 @@ interface ToolContext {
 ```typescript
 const plugin: ToolPlugin = {
   name: 'send_message',
-  description: '发送消息到指定聊天',
+  description: '发送消息到当前聊天',
   schema: {
     type: 'object',
     properties: {
-      chat_id: { type: 'string', description: '目标聊天 ID' },
-      text: { type: 'string', description: '消息内容' }
+      content: { type: 'string', description: '消息内容' }
     },
-    required: ['text']
+    required: ['content']
   },
   
   async execute(params, context) {
-    const chatId = params.chat_id as string || context.chatId;
-    const text = params.text as string;
-    
-    // 非主群组只能发送到当前聊天
-    if (!context.isMain && chatId !== context.chatId) {
-      return '错误：只能发送到当前聊天';
-    }
-    
-    await context.sendMessage(chatId, text);
-    return `已发送消息到 ${chatId}`;
+    const content = params.content as string;
+    await context.sendMessage(content);
+    return '已发送消息';
   }
 };
 ```
@@ -262,7 +253,7 @@ const plugin: ChannelPlugin = {
   },
   
   // 注册消息处理器
-  onMessage(handler: (msg: Message) => void): void {
+  onMessage(handler: (msg: Message) => Promise<void>): void {
     this.messageHandler = handler;
   },
   

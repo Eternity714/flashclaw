@@ -29,8 +29,16 @@ interface PluginManifest {
   name: string;
   version: string;
   type: PluginType;
-  description?: string;
+  description: string;
+  author?: string;
   main: string;
+  config?: Record<string, {
+    type: string;
+    required?: boolean;
+    env?: string;
+    default?: unknown;
+  }>;
+  dependencies?: string[];
 }
 ```
 
@@ -39,41 +47,53 @@ interface PluginManifest {
 ```typescript
 interface ToolPlugin {
   name: string;
+  version: string;
   description: string;
   
-  // Anthropic tool_use 格式的参数定义
-  schema: {
-    type: 'object';
-    properties: Record<string, {
-      type: string;
-      description: string;
-      enum?: string[];
-    }>;
-    required?: string[];
-  };
+  // 单工具模式
+  schema?: ToolSchema;
+  // 多工具模式
+  tools?: ToolSchema[];
   
-  // 执行函数
+  init?(config: PluginConfig): Promise<void>;
+  
+  // 单工具：execute(params, context)
+  // 多工具：execute(toolName, params, context)
   execute(
-    params: unknown,
-    context: ToolContext
+    paramsOrToolName: unknown,
+    contextOrParams?: ToolContext | unknown,
+    context?: ToolContext
   ): Promise<ToolResult>;
+  
+  reload?(): Promise<void>;
+  cleanup?(): Promise<void>;
 }
 
 interface ToolResult {
   success: boolean;
   data?: unknown;
   error?: string;
-  
-  // 可选：热重载
-  reload?(): Promise<void>;
 }
 
 interface ToolContext {
   chatId: string;        // 当前聊天 ID
   groupId: string;       // 群组文件夹名
   userId: string;        // 用户 ID（用于用户级别记忆）
-  isMain: boolean;       // 是否为主群组
-  sendMessage: (chatId: string, content: string) => Promise<void>;  // 发送消息
+  sendMessage: (content: string) => Promise<void>;  // 发送消息到当前聊天
+}
+
+interface ToolSchema {
+  name: string;
+  description: string;
+  input_schema: {
+    type: 'object';
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+interface PluginConfig {
+  [key: string]: unknown;
 }
 ```
 
@@ -82,15 +102,15 @@ interface ToolContext {
 ```typescript
 interface ChannelPlugin {
   name: string;
-  platform: string;
+  version: string;
   
   // 生命周期
-  init(config: Record<string, string>): Promise<void>;
+  init(config: PluginConfig): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
   
   // 消息处理
-  onMessage(handler: (msg: Message) => void): void;
+  onMessage(handler: (msg: Message) => Promise<void>): void;
   
   // 发送消息
   sendMessage(
@@ -104,7 +124,6 @@ interface ChannelPlugin {
   deleteMessage?(messageId: string): Promise<void>;
   sendImage?(chatId: string, imageData: string | Buffer, caption?: string): Promise<SendMessageResult>;
   sendFile?(chatId: string, filePath: string, fileName?: string): Promise<SendMessageResult>;
-  shouldRespondInGroup?(msg: Message): boolean;
   reload?(): Promise<void>;
 }
 
@@ -156,18 +175,24 @@ interface Attachment {
 
 class PluginManager {
   // 注册插件
-  registerChannel(plugin: ChannelPlugin): void;
-  registerTool(plugin: ToolPlugin): void;
+  register(plugin: Plugin): boolean;
   
-  // 注销插件
-  unregisterChannel(name: string): void;
-  unregisterTool(name: string): void;
+  // 卸载插件
+  unregister(name: string): Promise<boolean>;
   
   // 获取插件
-  getChannel(name: string): ChannelPlugin | undefined;
-  getTool(name: string): ToolPlugin | undefined;
-  getAllChannels(): ChannelPlugin[];
-  getAllTools(): ToolPlugin[];
+  getChannel(name: string): ChannelPlugin | null;
+  getTool(name: string): { plugin: ToolPlugin; isMultiTool: boolean } | null;
+  getActiveChannels(): ChannelPlugin[];
+  getActiveTools(): ToolSchema[];
+  
+  // 统计
+  getPluginNames(): string[];
+  getStats(): { total: number; tools: number; channels: number };
+  
+  // 清空/停止
+  clear(): Promise<void>;
+  stopAll(): Promise<void>;
 }
 ```
 
@@ -176,11 +201,11 @@ class PluginManager {
 ```typescript
 // src/plugins/loader.ts
 
-// 初始化插件系统
-function initPlugins(): Promise<void>;
+// 从目录加载所有插件
+function loadFromDir(pluginsDir: string): Promise<string[]>;
 
 // 加载单个插件
-function loadPlugin(pluginDir: string): Promise<void>;
+function loadPlugin(pluginDir: string): Promise<string | null>;
 
 // 重载插件
 function reloadPlugin(name: string): Promise<boolean>;
@@ -190,6 +215,12 @@ function watchPlugins(
   pluginsDir: string,
   onChange?: (event: string, name: string) => void
 ): void;
+
+// 停止监听
+function stopWatching(): void;
+
+// 获取已加载插件路径
+function getLoadedPaths(): Map<string, string>;
 ```
 
 ---
@@ -205,8 +236,9 @@ Agent Runner 负责执行 AI Agent。
 
 async function runAgent(
   group: RegisteredGroup,
-  input: AgentInput
-): Promise<string | null>
+  input: AgentInput,
+  retryConfig?: RetryConfig
+): Promise<AgentOutput>
 ```
 
 #### AgentInput
@@ -218,6 +250,8 @@ interface AgentInput {
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
+  isScheduledTask?: boolean;
+  userId?: string;
   attachments?: ImageAttachment[];
 }
 
@@ -225,6 +259,20 @@ interface ImageAttachment {
   type: 'image';
   content: string;      // Base64 编码
   mimeType?: string;    // 如 'image/png'
+}
+
+interface AgentOutput {
+  status: 'success' | 'error';
+  result: string | null;
+  newSessionId?: string;
+  error?: string;
+}
+
+interface RetryConfig {
+  maxRetries: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  retryableErrors: string[];
 }
 ```
 
@@ -297,10 +345,10 @@ function getTasksByGroup(groupFolder: string): ScheduledTask[];
 function getDueTasks(): ScheduledTask[];
 
 // 更新任务执行状态
-function updateTaskAfterRun(taskId: string, result: string, nextRun: string | null): void;
+function updateTaskAfterRun(taskId: string, nextRun: string | null, lastResult: string): void;
 
 // 记录任务运行
-function logTaskRun(taskId: string, result: string, durationMs: number): void;
+function logTaskRun(log: TaskRunLog): void;
 
 // 删除任务
 function deleteTask(taskId: string): void;
@@ -321,7 +369,7 @@ interface ScheduledTask {
   schedule_type: 'cron' | 'interval' | 'once';
   schedule_value: string;
   context_mode: 'group' | 'isolated';
-  status: 'active' | 'paused' | 'completed';
+  status: 'active' | 'paused' | 'completed' | 'failed';
   next_run: string | null;        // ISO 时间戳
   last_run: string | null;
   last_result: string | null;
@@ -331,6 +379,15 @@ interface ScheduledTask {
   retry_count: number;            // 当前重试次数
   max_retries: number;            // 最大重试次数（默认 3）
   timeout_ms?: number;            // 任务执行超时时间（毫秒，默认 300000）
+}
+
+interface TaskRunLog {
+  task_id: string;
+  run_at: string;
+  duration_ms: number;
+  status: 'success' | 'error';
+  result: string | null;
+  error: string | null;
 }
 ```
 
@@ -512,25 +569,51 @@ mm.forget(groupId: string, key?: string): boolean
 // src/core/api-client.ts
 
 class ApiClient {
-  constructor(config: ApiClientConfig);
+  constructor(config: ApiConfig);
   
   // 发送聊天请求
   async chat(
     messages: ChatMessage[],
-    tools?: ToolDefinition[],
-    systemPrompt?: string
-  ): Promise<ChatResponse>;
+    options?: ChatOptions
+  ): Promise<Anthropic.Message>;
+  
+  // 流式请求
+  async *chatStream(
+    messages: ChatMessage[],
+    options?: ChatOptions
+  ): AsyncGenerator<StreamEvent>;
+  
+  // 处理工具调用
+  async handleToolUse(
+    response: Anthropic.Message,
+    messages: ChatMessage[],
+    executeTool: ToolExecutor,
+    options?: ChatOptions
+  ): Promise<string>;
+  
+  // 从响应中提取文本
+  extractText(response: Anthropic.Message): string;
 }
 
-interface ApiClientConfig {
-  baseUrl: string;
-  authToken: string;
-  model: string;
+interface ApiConfig {
+  apiKey: string;
+  baseURL?: string;
+  model?: string;
+  maxRetries?: number;
+  timeout?: number;
 }
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: MessageContent;
+}
+
+interface ChatOptions {
+  system?: string;
+  tools?: ToolSchema[];
+  maxTokens?: number;
+  temperature?: number;
+  stopSequences?: string[];
 }
 
 // 支持多模态内容
@@ -549,6 +632,15 @@ interface ImageBlock {
     data: string;
   };
 }
+```
+
+### 全局单例
+
+```typescript
+import { getApiClient, resetApiClient } from './core/api-client.js';
+
+const client = getApiClient(); // 未配置时返回 null
+resetApiClient();              // 重新初始化配置
 ```
 
 ---
@@ -603,16 +695,47 @@ function getCurrentModelId(): string;
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
+| `FLASHCLAW_HOME` | 数据与配置根目录 | `~/.flashclaw` |
 | `LOG_LEVEL` | 日志级别 | `info` |
 | `BOT_NAME` | 机器人名称 | `FlashClaw` |
 | `TIMEZONE` | 时区 | `Asia/Shanghai` |
 | `AGENT_TIMEOUT` | Agent 超时(ms) | `300000` |
+| `HEALTH_PORT` | 健康检查端口（0=禁用） | `9090` |
+| `THINKING_THRESHOLD_MS` | "正在思考..." 提示阈值(ms) | `0` |
 | `AI_MODEL` | AI 模型 | `claude-sonnet-4-20250514` |
 | `ANTHROPIC_BASE_URL` | API 地址 | `https://api.anthropic.com` |
 | `ANTHROPIC_AUTH_TOKEN` | API Token | - |
 | `ANTHROPIC_API_KEY` | API Key | - |
 | `FEISHU_APP_ID` | 飞书应用 ID | - |
 | `FEISHU_APP_SECRET` | 飞书应用密钥 | - |
+
+### 测试/开发环境变量
+
+以下变量用于测试或本地开发：
+
+- `FLASHCLAW_MOCK_API=1`：启用 Mock API（不访问外部模型）
+- `FLASHCLAW_MOCK_RESPONSE_PREFIX`：Mock 回复前缀（默认 `MOCK`）
+- `FLASHCLAW_MOCK_TOOL_MARKER`：触发 Mock 工具调用的标记（默认 `[tool:send_message]`）
+- `FLASHCLAW_MOCK_FORCE_TOOL=1`：强制触发工具调用（输入为 `{ content: ... }`，适配 `send_message`）
+- `FLASHCLAW_PLUGIN_SOURCE=local`：插件安装使用本地源
+- `FLASHCLAW_PLUGIN_SOURCE_DIR`：本地插件源目录（默认 `./community-plugins`）
+
+### 高级配置（可选）
+
+- `MAX_CONCURRENT_TASKS`：调度器最大并发任务数（默认 `3`）
+- `DEFAULT_TASK_TIMEOUT_MS`：任务超时（默认 `300000`）
+- `RETRY_BASE_DELAY_MS`：重试基础延迟（默认 `60000`）
+- `MAX_RETRY_DELAY_MS`：最大重试延迟（默认 `3600000`）
+- `MESSAGE_QUEUE_MAX_SIZE`：单聊天队列长度（默认 `100`）
+- `MESSAGE_QUEUE_MAX_CONCURRENT`：消息并发处理数（默认 `3`）
+- `MESSAGE_QUEUE_PROCESSING_TIMEOUT_MS`：消息处理超时（默认 `300000`）
+- `MESSAGE_QUEUE_MAX_RETRIES`：消息最大重试次数（默认 `2`）
+- `HISTORY_CONTEXT_LIMIT`：历史消息上下文条数上限（默认 `500`）
+- `MAX_DIRECT_FETCH_CHARS`：直接抓取内容截断长度（默认 `4000`）
+- `MAX_IPC_FILE_BYTES`：IPC 单文件大小（默认 `1MB`）
+- `MAX_IPC_MESSAGE_CHARS`：IPC 消息最大长度（默认 `10000`）
+- `MAX_IPC_CHAT_ID_CHARS`：IPC chatId 最大长度（默认 `256`）
+- `MAX_IMAGE_BYTES`：图片附件大小上限（默认 `10MB`）
 
 ---
 

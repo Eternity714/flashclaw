@@ -1,0 +1,25 @@
+{
+  "name": "web-ui",
+  "version": "1.0.0",
+  "type": "tool",
+  "description": "FlashClaw Web 管理界面 - 实时监控与管理",
+  "main": "index.ts",
+  "author": "FlashClaw",
+  "config": {
+    "port": {
+      "type": "number",
+      "env": "WEBUI_PORT",
+      "default": 3000
+    },
+    "host": {
+      "type": "string",
+      "env": "WEBUI_HOST",
+      "default": "127.0.0.1"
+    },
+    "token": {
+      "type": "string",
+      "env": "WEBUI_TOKEN",
+      "required": false
+    }
+  }
+}

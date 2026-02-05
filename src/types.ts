@@ -41,7 +41,7 @@ export interface ScheduledTask {
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;
-  status: 'active' | 'paused' | 'completed';
+  status: 'active' | 'paused' | 'completed' | 'failed';
   created_at: string;
   /** 当前重试次数 */
   retry_count: number;

@@ -109,6 +109,56 @@ export type StreamEvent =
  */
 export type ToolExecutor = (name: string, params: unknown) => Promise<unknown>;
 
+// ==================== Mock API (E2E) ====================
+
+const MOCK_RESPONSE_PREFIX = process.env.FLASHCLAW_MOCK_RESPONSE_PREFIX || 'MOCK';
+const MOCK_TOOL_MARKER = process.env.FLASHCLAW_MOCK_TOOL_MARKER || '[tool:send_message]';
+
+function contentToText(content: MessageContent): string {
+  if (typeof content === 'string') return content;
+  return content
+    .filter(block => block.type === 'text')
+    .map(block => block.text)
+    .join('');
+}
+
+function getLastUserText(messages: ChatMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg.role === 'user') {
+      return contentToText(msg.content);
+    }
+  }
+  return '';
+}
+
+function shouldMockToolUse(prompt: string, tools?: ToolSchema[]): boolean {
+  if (!tools || tools.length === 0) return false;
+  if (process.env.FLASHCLAW_MOCK_FORCE_TOOL === '1') return true;
+  return prompt.includes(MOCK_TOOL_MARKER);
+}
+
+function buildMockMessage(params: {
+  content: Array<TextBlock | { type: 'tool_use'; id: string; name: string; input: unknown }>;
+  stopReason: 'end_turn' | 'tool_use';
+  model: string;
+}): Anthropic.Message {
+  const message = {
+    id: `mock-${Date.now()}`,
+    type: 'message',
+    role: 'assistant',
+    model: params.model,
+    content: params.content,
+    stop_reason: params.stopReason,
+    stop_sequence: null,
+    usage: {
+      input_tokens: 1,
+      output_tokens: 1,
+    },
+  };
+  return message as unknown as Anthropic.Message;
+}
+
 // ==================== API 客户端实现 ====================
 
 /**
@@ -476,6 +526,95 @@ export class ApiClient {
   }
 }
 
+class MockApiClient extends ApiClient {
+  private mockModel = 'mock-model';
+
+  constructor() {
+    super({ apiKey: 'mock' });
+  }
+
+  override async chat(
+    messages: ChatMessage[],
+    options?: ChatOptions
+  ): Promise<Anthropic.Message> {
+    const prompt = getLastUserText(messages);
+    const tools = options?.tools;
+    const useTool = shouldMockToolUse(prompt, tools);
+
+    if (useTool && tools && tools.length > 0) {
+      const toolName = tools.find(t => t.name === 'send_message')?.name || tools[0].name;
+      const toolInput = { content: `${MOCK_RESPONSE_PREFIX} TOOL: ${prompt}` };
+      return buildMockMessage({
+        model: this.mockModel,
+        stopReason: 'tool_use',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'mock_tool_1',
+            name: toolName,
+            input: toolInput,
+          },
+        ],
+      });
+    }
+
+    const text = `${MOCK_RESPONSE_PREFIX}: ${prompt}`;
+    return buildMockMessage({
+      model: this.mockModel,
+      stopReason: 'end_turn',
+      content: [{ type: 'text', text }],
+    });
+  }
+
+  override async *chatStream(
+    messages: ChatMessage[],
+    options?: ChatOptions
+  ): AsyncGenerator<StreamEvent> {
+    const response = await this.chat(messages, options);
+    const text = this.extractText(response);
+    if (text) {
+      yield { type: 'text', text };
+    }
+    yield { type: 'done', message: response };
+  }
+
+  override async handleToolUse(
+    response: Anthropic.Message,
+    _messages: ChatMessage[],
+    executeTool: ToolExecutor
+  ): Promise<string> {
+    const toolUseBlocks = response.content.filter(
+      (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use'
+    );
+
+    if (toolUseBlocks.length === 0) {
+      return this.extractText(response);
+    }
+
+    const results: string[] = [];
+    for (const toolUse of toolUseBlocks) {
+      const result = await executeTool(toolUse.name, toolUse.input);
+      results.push(typeof result === 'string' ? result : JSON.stringify(result));
+    }
+    return results.join('\n');
+  }
+
+  override extractText(response: Anthropic.Message): string {
+    const textBlocks = response.content.filter(
+      (block): block is Anthropic.TextBlock => block.type === 'text'
+    );
+    return textBlocks.map(block => block.text).join('');
+  }
+
+  override getModel(): string {
+    return this.mockModel;
+  }
+
+  override setModel(model: string): void {
+    this.mockModel = model;
+  }
+}
+
 // ==================== 工厂函数 ====================
 
 /**
@@ -485,6 +624,9 @@ export class ApiClient {
  * @returns API 客户端实例，如果配置缺失则返回 null
  */
 export function createApiClient(): ApiClient | null {
+  if (process.env.FLASHCLAW_MOCK_API === '1') {
+    return new MockApiClient();
+  }
   // 支持两种环境变量名（兼容不同配置）
   const apiKey = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {

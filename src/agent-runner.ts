@@ -12,12 +12,12 @@
 import fs from 'fs';
 import path from 'path';
 import pino from 'pino';
+import type Anthropic from '@anthropic-ai/sdk';
 import {
-  GROUPS_DIR,
-  DATA_DIR,
   AGENT_TIMEOUT,
   TIMEZONE
 } from './config.js';
+import { paths } from './paths.js';
 import { RegisteredGroup } from './types.js';
 import { ApiClient, ChatMessage, ToolSchema, getApiClient, TextBlock, ImageBlock } from './core/api-client.js';
 import { currentModelSupportsVision, getCurrentModelId } from './core/model-capabilities.js';
@@ -52,6 +52,8 @@ export interface AgentInput {
   userId?: string;
   /** 图片附件列表 */
   attachments?: ImageAttachment[];
+  /** 流式输出回调（可选） */
+  onToken?: (text: string) => void;
 }
 
 export interface AgentOutput {
@@ -85,7 +87,7 @@ interface ToolResult {
  * 获取 IPC 目录路径
  */
 function getIpcDir(groupFolder: string): string {
-  return path.join(DATA_DIR, 'ipc', groupFolder);
+  return path.join(paths.data(), 'ipc', groupFolder);
 }
 
 /**
@@ -269,7 +271,7 @@ function getGroupSystemPrompt(group: RegisteredGroup, isMain: boolean, isSchedul
   const toolsList = getAvailableToolsList();
   
   // 读取群组的 CLAUDE.md 文件（如果存在）
-  const groupDir = path.join(GROUPS_DIR, group.folder);
+  const groupDir = path.join(paths.groups(), group.folder);
   const claudeMdPath = path.join(groupDir, 'CLAUDE.md');
   let basePrompt = '';
   
@@ -405,7 +407,7 @@ async function runAgentOnce(
   // 获取记忆管理器
   const memoryManager = getMemoryManager();
 
-  const groupDir = path.join(GROUPS_DIR, group.folder);
+  const groupDir = path.join(paths.groups(), group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
   // Setup IPC directories
@@ -545,7 +547,7 @@ async function runAgentOnce(
   try {
     // 使用流式 API 获取响应（避免长时间等待导致超时）
     let responseText = '';
-    let finalResponse: any = null;
+    let finalResponse: Anthropic.Message | null = null;
     
     logger.info({ group: group.name }, '⚡ 开始流式请求');
     
@@ -563,6 +565,7 @@ async function runAgentOnce(
       
       if (event.type === 'text') {
         responseText += event.text;
+        input.onToken?.(event.text);
       } else if (event.type === 'done') {
         finalResponse = event.message;
       }
@@ -578,7 +581,7 @@ async function runAgentOnce(
     logger.info({ 
       group: group.name,
       stopReason: finalResponse.stop_reason,
-      contentTypes: finalResponse.content.map((c: any) => c.type)
+      contentTypes: finalResponse.content.map((c) => c.type)
     }, '⚡ API 响应');
     
     // 记录 token 使用

@@ -164,11 +164,10 @@ git push origin feature/your-feature-name
 
 ```typescript
 /**
- * 发送消息到指定聊天
- * @param chatId 聊天 ID
- * @param text 消息内容
+ * 发送消息到当前聊天
+ * @param content 消息内容
  */
-async function sendMessage(chatId: string, text: string): Promise<void> {
+async function sendMessage(content: string): Promise<void> {
   // ...
 }
 ```

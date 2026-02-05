@@ -15,6 +15,17 @@ import type { ApiClient, ChatMessage } from './api-client.js';
 import { createLogger } from '../logger.js';
 
 const logger = createLogger('MemoryManager');
+const CJK_CHAR_REGEX = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+function countCjkChars(text: string): number {
+  let count = 0;
+  for (const char of text) {
+    if (CJK_CHAR_REGEX.test(char)) {
+      count += 1;
+    }
+  }
+  return count;
+}
 
 // ==================== 类型定义 ====================
 
@@ -158,14 +169,17 @@ export class MemoryManager {
   
   /**
    * 估算单条消息的 token 数
-   * 中文约 2 字符/token，英文约 4 字符/token
+   * 中文约 1 字符/token，英文约 4 字符/token
    */
   private estimateMessageTokens(message: ChatMessage): number {
     const content = typeof message.content === 'string' 
       ? message.content 
       : JSON.stringify(message.content);
-    // 保守估计：平均 2 字符/token，加上角色和格式开销
-    return Math.ceil(content.length / 2) + 10;
+    const cjkCount = countCjkChars(content);
+    const nonCjkLength = Math.max(0, content.length - cjkCount);
+    const nonCjkTokens = Math.ceil(nonCjkLength / 4);
+    // 保守估计：中文 1 字符/token，英文 4 字符/token，加上角色和格式开销
+    return Math.max(1, cjkCount + nonCjkTokens + 10);
   }
   
   /**

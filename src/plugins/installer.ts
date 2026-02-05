@@ -29,6 +29,11 @@ function getProxyUrl(): string | null {
          null;
 }
 
+function getLocalPluginSource(): string | null {
+  if (process.env.FLASHCLAW_PLUGIN_SOURCE !== 'local') return null;
+  return process.env.FLASHCLAW_PLUGIN_SOURCE_DIR || join(process.cwd(), 'community-plugins');
+}
+
 /**
  * 使用系统命令下载文件（自动处理代理和重定向）
  * Windows 使用 PowerShell，Unix 使用 curl
@@ -733,6 +738,22 @@ async function downloadOfficialPlugin(
   pluginName: string,
   targetDir: string
 ): Promise<void> {
+  const localSource = getLocalPluginSource();
+  if (localSource) {
+    const sourceRoot = resolve(localSource);
+    const pluginSourceDir = resolve(sourceRoot, pluginName);
+    if (!pluginSourceDir.startsWith(sourceRoot + sep)) {
+      throw new Error(`插件路径不安全: ${pluginName}`);
+    }
+    if (!existsSync(pluginSourceDir)) {
+      throw new Error(`本地插件源不存在: ${pluginSourceDir}`);
+    }
+    await ensureDir(targetDir);
+    await copyDir(pluginSourceDir, targetDir);
+    log.success(`插件已安装到: ${targetDir} (local source)`);
+    return;
+  }
+
   const repo = registry.officialRepo || 'GuLu9527/flashclaw';
   const pluginsPath = registry.officialPluginsPath || 'community-plugins';
   if (!isSafeRelativePath(pluginsPath)) {

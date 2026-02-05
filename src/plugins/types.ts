@@ -46,6 +46,7 @@ export interface Message {
   attachments?: Attachment[];   // 附件列表
   mentions?: string[];          // 被 @ 的用户
   replyToMessageId?: string;    // 回复的消息 ID
+  raw?: unknown;                // 平台原始消息
 }
 
 // 消息处理器

@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { isIP } from 'net';
 import pino from 'pino';
+import { z } from 'zod';
 
 import { paths, ensureDirectories, getBuiltinPluginsDir } from './paths.js';
 import { pluginManager } from './plugins/manager.js';
@@ -17,10 +18,20 @@ import { ApiClient, getApiClient } from './core/api-client.js';
 import { MemoryManager, getMemoryManager } from './core/memory.js';
 import {
   BOT_NAME,
-  DATA_DIR,
   MAIN_GROUP_FOLDER,
   IPC_POLL_INTERVAL,
-  TIMEZONE
+  TIMEZONE,
+  HISTORY_CONTEXT_LIMIT,
+  THINKING_THRESHOLD_MS,
+  MAX_DIRECT_FETCH_CHARS,
+  MAX_IPC_FILE_BYTES,
+  MAX_IPC_MESSAGE_CHARS,
+  MAX_IPC_CHAT_ID_CHARS,
+  MAX_IMAGE_BYTES,
+  MESSAGE_QUEUE_MAX_SIZE,
+  MESSAGE_QUEUE_MAX_CONCURRENT,
+  MESSAGE_QUEUE_PROCESSING_TIMEOUT_MS,
+  MESSAGE_QUEUE_MAX_RETRIES
 } from './config.js';
 import { RegisteredGroup, Session } from './types.js';
 import {
@@ -33,7 +44,8 @@ import {
   getAllTasks,
   getAllChats
 } from './db.js';
-import { startSchedulerLoop, stopScheduler } from './task-scheduler.js';
+import { startSchedulerLoop, stopScheduler, wake } from './task-scheduler.js';
+import { startHealthServer, stopHealthServer } from './health.js';
 import { runAgent, writeTasksSnapshot, writeGroupsSnapshot, AvailableGroup } from './agent-runner.js';
 import { loadJson, saveJson } from './utils.js';
 import { MessageQueue, QueuedMessage } from './message-queue.js';
@@ -45,6 +57,10 @@ import Database from 'better-sqlite3';
 declare global {
   // eslint-disable-next-line no-var
   var __flashclaw_db: Database.Database | undefined;
+  // eslint-disable-next-line no-var
+  var __flashclaw_run_agent: typeof runAgent | undefined;
+  // eslint-disable-next-line no-var
+  var __flashclaw_registered_groups: Map<string, RegisteredGroup> | undefined;
 }
 
 // ⚡ FlashClaw Logger
@@ -90,7 +106,8 @@ class ChannelManager {
     for (const channel of this.channels) {
       try {
         return await channel.sendMessage(chatId, content);
-      } catch {
+      } catch (err) {
+        logger.debug({ channel: channel.name, chatId, err }, '渠道发送消息失败，尝试下一个');
         continue;
       }
     }
@@ -112,7 +129,8 @@ class ChannelManager {
         try {
           await channel.updateMessage(messageId, content);
           return;
-        } catch {
+        } catch (err) {
+          logger.debug({ channel: channel.name, messageId, err }, '渠道更新消息失败，尝试下一个');
           continue;
         }
       }
@@ -132,7 +150,8 @@ class ChannelManager {
         try {
           await channel.deleteMessage(messageId);
           return;
-        } catch {
+        } catch (err) {
+          logger.debug({ channel: channel.name, messageId, err }, '渠道删除消息失败，尝试下一个');
           continue;
         }
       }
@@ -168,26 +187,12 @@ let lastAgentTimestamp: Record<string, string> = {};
 let messageQueue: MessageQueue<Message>;
 let isShuttingDown = false;
 
-// 消息历史上下文配置
-// 现在由 MemoryManager 基于 token 自动管理，这里只是一个备用限制
-const HISTORY_CONTEXT_LIMIT = 500;
-
-// "正在思考..." 提示配置
-// 注意：飞书不支持更新普通文本消息，所以默认禁用此功能
-// 如需启用，设置环境变量 THINKING_THRESHOLD_MS=2500（毫秒）
-const THINKING_THRESHOLD_MS = Number(process.env.THINKING_THRESHOLD_MS ?? 0);
-
 // 直接网页抓取触发（避免模型不触发工具）
 const WEB_FETCH_TOOL_NAME = 'web_fetch';
 const WEB_FETCH_INTENT_RE = /(抓取|获取|读取|访问|打开|爬取|网页|网站|链接|fetch|web)/i;
 const WEB_FETCH_URL_RE = /https?:\/\/[^\s<>()]+/i;
 const WEB_FETCH_DOMAIN_RE = /(?:^|[^A-Za-z0-9.-])((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})(:\d{2,5})?(\/[^\s<>()]*)?/i;
 const TRAILING_PUNCT_RE = /[)\],.。，;；!！?？]+$/;
-const MAX_DIRECT_FETCH_CHARS = 4000;
-const MAX_IPC_FILE_BYTES = 1024 * 1024;
-const MAX_IPC_MESSAGE_CHARS = 10000;
-const MAX_IPC_CHAT_ID_CHARS = 256;
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 // ==================== 状态管理 ====================
 
@@ -200,11 +205,12 @@ const DEFAULT_MAIN_GROUP: RegisteredGroup = {
 };
 
 function loadState(): void {
-  const statePath = path.join(DATA_DIR, 'router_state.json');
+  const dataDir = paths.data();
+  const statePath = path.join(dataDir, 'router_state.json');
   const state = loadJson<{ last_timestamp?: string; last_agent_timestamp?: Record<string, string> }>(statePath, {});
   lastAgentTimestamp = state.last_agent_timestamp || {};
-  sessions = loadJson(path.join(DATA_DIR, 'sessions.json'), {});
-  registeredGroups = loadJson(path.join(DATA_DIR, 'registered_groups.json'), {});
+  sessions = loadJson(path.join(dataDir, 'sessions.json'), {});
+  registeredGroups = loadJson(path.join(dataDir, 'registered_groups.json'), {});
   
   // 确保有 main 群组配置模板（用于自动注册）
   const hasMainGroup = Object.values(registeredGroups).some(g => g.folder === MAIN_GROUP_FOLDER);
@@ -218,13 +224,19 @@ function loadState(): void {
 }
 
 function saveState(): void {
-  saveJson(path.join(DATA_DIR, 'router_state.json'), { last_agent_timestamp: lastAgentTimestamp });
-  saveJson(path.join(DATA_DIR, 'sessions.json'), sessions);
+  const dataDir = paths.data();
+  saveJson(path.join(dataDir, 'router_state.json'), { last_agent_timestamp: lastAgentTimestamp });
+  saveJson(path.join(dataDir, 'sessions.json'), sessions);
 }
 
 function registerGroup(chatId: string, group: RegisteredGroup): void {
   registeredGroups[chatId] = group;
-  saveJson(path.join(DATA_DIR, 'registered_groups.json'), registeredGroups);
+  saveJson(path.join(paths.data(), 'registered_groups.json'), registeredGroups);
+  
+  // 同步更新全局 Map
+  if (global.__flashclaw_registered_groups) {
+    global.__flashclaw_registered_groups.set(chatId, group);
+  }
 
   // 创建群组文件夹
   const groupDir = path.join(paths.groups(), group.folder);
@@ -280,7 +292,7 @@ function shouldTriggerAgent(msg: Message, group: RegisteredGroup): boolean {
   return false;
 }
 
-function extractFirstUrl(text: string): string | null {
+export function extractFirstUrl(text: string): string | null {
   const match = text.match(WEB_FETCH_URL_RE);
   if (match) {
     return match[0].replace(TRAILING_PUNCT_RE, '');
@@ -295,7 +307,7 @@ function extractFirstUrl(text: string): string | null {
   return candidate.replace(TRAILING_PUNCT_RE, '');
 }
 
-function isPrivateIpv4(ip: string): boolean {
+export function isPrivateIpv4(ip: string): boolean {
   const parts = ip.split('.').map((part) => Number(part));
   if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) return false;
 
@@ -310,7 +322,7 @@ function isPrivateIpv4(ip: string): boolean {
   return false;
 }
 
-function isPrivateIpv6(ip: string): boolean {
+export function isPrivateIpv6(ip: string): boolean {
   const normalized = ip.toLowerCase();
   if (normalized === '::' || normalized === '::1') return true;
   if (normalized.startsWith('fe80:')) return true;
@@ -325,14 +337,14 @@ function isPrivateIpv6(ip: string): boolean {
   return false;
 }
 
-function isPrivateIp(ip: string): boolean {
+export function isPrivateIp(ip: string): boolean {
   const family = isIP(ip);
   if (family === 4) return isPrivateIpv4(ip);
   if (family === 6) return isPrivateIpv6(ip);
   return false;
 }
 
-function isBlockedHostname(hostname: string): boolean {
+export function isBlockedHostname(hostname: string): boolean {
   const normalized = hostname.trim().toLowerCase();
   if (normalized === 'localhost') return true;
   return (
@@ -342,7 +354,7 @@ function isBlockedHostname(hostname: string): boolean {
   );
 }
 
-function estimateBase64Bytes(content: string): number | null {
+export function estimateBase64Bytes(content: string): number | null {
   if (!content) return null;
   const raw = content.startsWith('data:') ? content.split(',')[1] ?? '' : content;
   const normalized = raw.replace(/\s+/g, '');
@@ -351,14 +363,14 @@ function estimateBase64Bytes(content: string): number | null {
   return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
 }
 
-function truncateText(text: string, maxLength: number): { text: string; truncated: boolean } {
+export function truncateText(text: string, maxLength: number): { text: string; truncated: boolean } {
   if (text.length <= maxLength) {
     return { text, truncated: false };
   }
   return { text: `${text.slice(0, maxLength)}\n\n...（内容已截断）`, truncated: true };
 }
 
-function formatDirectWebFetchResponse(url: string, result: { success: boolean; data?: unknown; error?: string }): string {
+export function formatDirectWebFetchResponse(url: string, result: { success: boolean; data?: unknown; error?: string }): string {
   if (!result.success) {
     return `❌ 抓取失败: ${result.error || '未知错误'}`;
   }
@@ -545,8 +557,8 @@ async function processQueuedMessage(queuedMsg: QueuedMessage<Message>): Promise<
         placeholderMessageId = result.messageId;
         logger.debug({ chatId, messageId: placeholderMessageId }, '已发送思考提示');
       }
-    } catch {
-      // 忽略错误
+    } catch (err) {
+      logger.debug({ chatId, err }, '发送思考提示失败');
     }
   }, THINKING_THRESHOLD_MS) : null;
 
@@ -572,11 +584,14 @@ async function processQueuedMessage(queuedMsg: QueuedMessage<Message>): Promise<
         try {
           await channelManager.updateMessage(placeholderMessageId, finalText, msg.platform);
           logger.info({ chatId, messageId: placeholderMessageId }, '⚡ 消息已更新');
-        } catch {
+        } catch (updateErr) {
           // 更新失败，尝试删除并发送新消息
+          logger.debug({ chatId, messageId: placeholderMessageId, err: updateErr }, '更新占位消息失败，尝试删除并重发');
           try {
             await channelManager.deleteMessage(placeholderMessageId, msg.platform);
-          } catch {}
+          } catch (deleteErr) {
+            logger.debug({ chatId, messageId: placeholderMessageId, err: deleteErr }, '删除占位消息失败');
+          }
           await sendMessage(chatId, finalText, msg.platform);
         }
       } else {
@@ -597,7 +612,9 @@ async function processQueuedMessage(queuedMsg: QueuedMessage<Message>): Promise<
       // 没有响应，删除占位消息
       try {
         await channelManager.deleteMessage(placeholderMessageId, msg.platform);
-      } catch {}
+      } catch (deleteErr) {
+        logger.debug({ chatId, messageId: placeholderMessageId, err: deleteErr }, '删除占位消息失败（无响应）');
+      }
     }
   } catch (err) {
     thinkingDone = true;
@@ -609,7 +626,9 @@ async function processQueuedMessage(queuedMsg: QueuedMessage<Message>): Promise<
     if (placeholderMessageId) {
       try {
         await channelManager.deleteMessage(placeholderMessageId, msg.platform);
-      } catch {}
+      } catch (deleteErr) {
+        logger.debug({ chatId, messageId: placeholderMessageId, err: deleteErr }, '删除占位消息失败（错误恢复）');
+      }
     }
     
     throw err;
@@ -846,7 +865,7 @@ async function executeAgent(group: RegisteredGroup, prompt: string, chatId: stri
 
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
-      saveJson(path.join(DATA_DIR, 'sessions.json'), sessions);
+      saveJson(path.join(paths.data(), 'sessions.json'), sessions);
     }
 
     if (output.status === 'error') {
@@ -886,7 +905,7 @@ function quarantineIpcFile(ipcBaseDir: string, sourceGroup: string, filePath: st
 }
 
 function startIpcWatcher(): void {
-  const ipcBaseDir = path.join(DATA_DIR, 'ipc');
+  const ipcBaseDir = path.join(paths.data(), 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
 
   const processIpcFiles = async () => {
@@ -983,154 +1002,190 @@ function startIpcWatcher(): void {
   logger.info('⚡ IPC 监听已启动');
 }
 
+// ==================== IPC Schema 验证 ====================
+
+/** 基础 IPC 消息 schema */
+const IpcBaseSchema = z.object({
+  type: z.string().min(1).max(50),
+});
+
+/** schedule_task IPC schema */
+const IpcScheduleTaskSchema = IpcBaseSchema.extend({
+  type: z.literal('schedule_task'),
+  prompt: z.string().min(1).max(10000),
+  schedule_type: z.enum(['cron', 'interval', 'once']),
+  schedule_value: z.string().min(1).max(200),
+  groupFolder: z.string().min(1).max(100),
+  context_mode: z.enum(['group', 'isolated']).optional(),
+  max_retries: z.number().int().min(0).max(10).optional(),
+  timeout_ms: z.number().int().min(1000).max(3600000).optional(),
+});
+
+/** pause/resume/cancel task IPC schema */
+const IpcTaskActionSchema = IpcBaseSchema.extend({
+  type: z.enum(['pause_task', 'resume_task', 'cancel_task']),
+  taskId: z.string().min(1).max(100),
+});
+
+/** register_group IPC schema */
+const IpcRegisterGroupSchema = IpcBaseSchema.extend({
+  type: z.literal('register_group'),
+  jid: z.string().min(1).max(256),
+  name: z.string().min(1).max(200),
+  folder: z.string().min(1).max(100).regex(/^[a-zA-Z0-9_-]+$/),
+  trigger: z.string().min(1).max(50),
+  agentConfig: z.object({
+    timeout: z.number().int().min(1000).max(3600000).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+  }).optional(),
+});
+
+/** 联合 IPC schema */
+const IpcMessageSchema = z.discriminatedUnion('type', [
+  IpcScheduleTaskSchema,
+  IpcTaskActionSchema.extend({ type: z.literal('pause_task') }),
+  IpcTaskActionSchema.extend({ type: z.literal('resume_task') }),
+  IpcTaskActionSchema.extend({ type: z.literal('cancel_task') }),
+  IpcRegisterGroupSchema,
+]);
+
+type IpcMessage = z.infer<typeof IpcMessageSchema>;
+
 async function processTaskIpc(
-  data: {
-    type: string;
-    taskId?: string;
-    prompt?: string;
-    schedule_type?: string;
-    schedule_value?: string;
-    context_mode?: string;
-    groupFolder?: string;
-    chatJid?: string;
-    jid?: string;
-    name?: string;
-    folder?: string;
-    trigger?: string;
-    agentConfig?: RegisteredGroup['agentConfig'];
-    max_retries?: number;
-    timeout_ms?: number;
-  },
+  rawData: unknown,
   sourceGroup: string,
   isMain: boolean
 ): Promise<void> {
+  // Zod schema 验证
+  const parseResult = IpcMessageSchema.safeParse(rawData);
+  if (!parseResult.success) {
+    logger.warn({ 
+      sourceGroup, 
+      errors: parseResult.error.flatten().fieldErrors 
+    }, 'IPC 消息验证失败');
+    return;
+  }
+  
+  const data = parseResult.data;
   const { createTask, updateTask, deleteTask, getTaskById: getTask } = await import('./db.js');
   const { CronExpressionParser } = await import('cron-parser');
 
   switch (data.type) {
-    case 'schedule_task':
-      if (data.prompt && data.schedule_type && data.schedule_value && data.groupFolder) {
-        const targetGroup = data.groupFolder;
-        if (!isMain && targetGroup !== sourceGroup) {
-          logger.warn({ sourceGroup, targetGroup }, '未授权的 schedule_task 被阻止');
+    case 'schedule_task': {
+      // Zod 已验证必填字段，直接使用
+      const targetGroup = data.groupFolder;
+      if (!isMain && targetGroup !== sourceGroup) {
+        logger.warn({ sourceGroup, targetGroup }, '未授权的 schedule_task 被阻止');
+        break;
+      }
+
+      const targetChatId = Object.entries(registeredGroups).find(
+        ([, group]) => group.folder === targetGroup
+      )?.[0];
+
+      if (!targetChatId) {
+        logger.warn({ targetGroup }, '无法创建任务：目标群组未注册');
+        break;
+      }
+
+      const scheduleType = data.schedule_type;
+
+      let nextRun: string | null = null;
+      if (scheduleType === 'cron') {
+        try {
+          const interval = CronExpressionParser.parse(data.schedule_value, { tz: TIMEZONE });
+          nextRun = interval.next().toISOString();
+        } catch {
+          logger.warn({ scheduleValue: data.schedule_value }, '无效的 cron 表达式');
           break;
         }
-
-        const targetChatId = Object.entries(registeredGroups).find(
-          ([, group]) => group.folder === targetGroup
-        )?.[0];
-
-        if (!targetChatId) {
-          logger.warn({ targetGroup }, '无法创建任务：目标群组未注册');
+      } else if (scheduleType === 'interval') {
+        const ms = parseInt(data.schedule_value, 10);
+        if (isNaN(ms) || ms <= 0) {
+          logger.warn({ scheduleValue: data.schedule_value }, '无效的间隔值');
           break;
         }
-
-        const scheduleType = data.schedule_type as 'cron' | 'interval' | 'once';
-
-        let nextRun: string | null = null;
-        if (scheduleType === 'cron') {
-          try {
-            const interval = CronExpressionParser.parse(data.schedule_value, { tz: TIMEZONE });
-            nextRun = interval.next().toISOString();
-          } catch {
-            logger.warn({ scheduleValue: data.schedule_value }, '无效的 cron 表达式');
-            break;
-          }
-        } else if (scheduleType === 'interval') {
-          const ms = parseInt(data.schedule_value, 10);
-          if (isNaN(ms) || ms <= 0) {
-            logger.warn({ scheduleValue: data.schedule_value }, '无效的间隔值');
-            break;
-          }
-          nextRun = new Date(Date.now() + ms).toISOString();
-        } else if (scheduleType === 'once') {
-          const scheduled = new Date(data.schedule_value);
-          if (isNaN(scheduled.getTime())) {
-            logger.warn({ scheduleValue: data.schedule_value }, '无效的时间戳');
-            break;
-          }
-          nextRun = scheduled.toISOString();
+        nextRun = new Date(Date.now() + ms).toISOString();
+      } else if (scheduleType === 'once') {
+        const scheduled = new Date(data.schedule_value);
+        if (isNaN(scheduled.getTime())) {
+          logger.warn({ scheduleValue: data.schedule_value }, '无效的时间戳');
+          break;
         }
+        nextRun = scheduled.toISOString();
+      }
 
-        const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const contextMode = (data.context_mode === 'group' || data.context_mode === 'isolated')
-          ? data.context_mode
-          : 'isolated';
-        createTask({
-          id: taskId,
-          group_folder: targetGroup,
-          chat_jid: targetChatId,
-          prompt: data.prompt,
-          schedule_type: scheduleType,
-          schedule_value: data.schedule_value,
-          context_mode: contextMode,
-          next_run: nextRun,
-          status: 'active',
-          created_at: new Date().toISOString(),
-          retry_count: 0,
-          max_retries: data.max_retries ?? 3,
-          timeout_ms: data.timeout_ms ?? 300000
-        });
-        logger.info({ taskId, sourceGroup, targetGroup, contextMode }, '⚡ 任务已创建');
+      const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const contextMode = data.context_mode ?? 'isolated';
+      createTask({
+        id: taskId,
+        group_folder: targetGroup,
+        chat_jid: targetChatId,
+        prompt: data.prompt,
+        schedule_type: scheduleType,
+        schedule_value: data.schedule_value,
+        context_mode: contextMode,
+        next_run: nextRun,
+        status: 'active',
+        created_at: new Date().toISOString(),
+        retry_count: 0,
+        max_retries: data.max_retries ?? 3,
+        timeout_ms: data.timeout_ms ?? 300000
+      });
+      // 唤醒调度器，确保新任务立即生效
+      wake();
+      logger.info({ taskId, sourceGroup, targetGroup, contextMode }, '⚡ 任务已创建');
+      break;
+    }
+
+    case 'pause_task': {
+      const task = getTask(data.taskId);
+      if (task && (isMain || task.group_folder === sourceGroup)) {
+        updateTask(data.taskId, { status: 'paused' });
+        logger.info({ taskId: data.taskId, sourceGroup }, '任务已暂停');
+      } else {
+        logger.warn({ taskId: data.taskId, sourceGroup }, '未授权的任务暂停操作');
       }
       break;
+    }
 
-    case 'pause_task':
-      if (data.taskId) {
-        const task = getTask(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'paused' });
-          logger.info({ taskId: data.taskId, sourceGroup }, '任务已暂停');
-        } else {
-          logger.warn({ taskId: data.taskId, sourceGroup }, '未授权的任务暂停操作');
-        }
+    case 'resume_task': {
+      const task = getTask(data.taskId);
+      if (task && (isMain || task.group_folder === sourceGroup)) {
+        updateTask(data.taskId, { status: 'active' });
+        logger.info({ taskId: data.taskId, sourceGroup }, '任务已恢复');
+      } else {
+        logger.warn({ taskId: data.taskId, sourceGroup }, '未授权的任务恢复操作');
       }
       break;
+    }
 
-    case 'resume_task':
-      if (data.taskId) {
-        const task = getTask(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'active' });
-          logger.info({ taskId: data.taskId, sourceGroup }, '任务已恢复');
-        } else {
-          logger.warn({ taskId: data.taskId, sourceGroup }, '未授权的任务恢复操作');
-        }
+    case 'cancel_task': {
+      const task = getTask(data.taskId);
+      if (task && (isMain || task.group_folder === sourceGroup)) {
+        deleteTask(data.taskId);
+        logger.info({ taskId: data.taskId, sourceGroup }, '任务已取消');
+      } else {
+        logger.warn({ taskId: data.taskId, sourceGroup }, '未授权的任务取消操作');
       }
       break;
+    }
 
-    case 'cancel_task':
-      if (data.taskId) {
-        const task = getTask(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          deleteTask(data.taskId);
-          logger.info({ taskId: data.taskId, sourceGroup }, '任务已取消');
-        } else {
-          logger.warn({ taskId: data.taskId, sourceGroup }, '未授权的任务取消操作');
-        }
-      }
-      break;
-
-    case 'register_group':
+    case 'register_group': {
       if (!isMain) {
         logger.warn({ sourceGroup }, '未授权的 register_group 被阻止');
         break;
       }
-      if (data.jid && data.name && data.folder && data.trigger) {
-        registerGroup(data.jid, {
-          name: data.name,
-          folder: data.folder,
-          trigger: data.trigger,
-          added_at: new Date().toISOString(),
-          agentConfig: data.agentConfig
-        });
-      } else {
-        logger.warn({ data }, '无效的 register_group 请求');
-      }
+      // Zod 已验证必填字段，直接使用
+      registerGroup(data.jid, {
+        name: data.name,
+        folder: data.folder,
+        trigger: data.trigger,
+        added_at: new Date().toISOString(),
+        agentConfig: data.agentConfig
+      });
       break;
-
-    default:
-      logger.warn({ type: data.type }, '未知的 IPC 任务类型');
+    }
   }
 }
 
@@ -1235,13 +1290,17 @@ export async function main(): Promise<void> {
 
   // 加载状态
   loadState();
+  
+  // 注入全局变量，供 Web UI 等插件使用
+  global.__flashclaw_run_agent = runAgent;
+  global.__flashclaw_registered_groups = new Map(Object.entries(registeredGroups));
 
   // 初始化消息队列
   messageQueue = new MessageQueue<Message>(processQueuedMessage, {
-    maxQueueSize: 100,
-    maxConcurrent: 3,
-    processingTimeout: 300000,
-    maxRetries: 2
+    maxQueueSize: MESSAGE_QUEUE_MAX_SIZE,
+    maxConcurrent: MESSAGE_QUEUE_MAX_CONCURRENT,
+    processingTimeout: MESSAGE_QUEUE_PROCESSING_TIMEOUT_MS,
+    maxRetries: MESSAGE_QUEUE_MAX_RETRIES
   });
   messageQueue.start();
   logger.info('⚡ 消息队列已初始化');
@@ -1268,6 +1327,12 @@ export async function main(): Promise<void> {
     platforms: enabledPlatforms,
     groups: groupCount
   }, '⚡ FlashClaw 已启动');
+
+  // 启动健康检查服务（可通过 HEALTH_PORT 环境变量配置端口，默认 9090）
+  const healthPort = parseInt(process.env.HEALTH_PORT || '9090', 10);
+  if (healthPort > 0) {
+    startHealthServer(healthPort);
+  }
 
   // 注册优雅关闭处理
   setupGracefulShutdown();
@@ -1321,7 +1386,11 @@ async function gracefulShutdown(signal: string): Promise<void> {
     logger.info('⚡ 卸载插件...');
     await pluginManager.clear();
     
-    // 8. 保存状态
+    // 8. 停止健康检查服务
+    logger.info('⚡ 停止健康检查服务...');
+    stopHealthServer();
+    
+    // 9. 保存状态
     logger.info('⚡ 保存状态...');
     saveState();
     
@@ -1354,8 +1423,10 @@ function setupGracefulShutdown(): void {
   });
 }
 
-// 直接运行时启动
-main().catch(err => {
-  logger.error({ err }, '⚡ FlashClaw 启动失败');
-  process.exit(1);
-});
+// 直接运行时启动（测试环境可通过 FLASHCLAW_SKIP_MAIN=1 禁用）
+if (process.env.FLASHCLAW_SKIP_MAIN !== '1') {
+  main().catch(err => {
+    logger.error({ err }, '⚡ FlashClaw 启动失败');
+    process.exit(1);
+  });
+}

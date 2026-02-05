@@ -1,6 +1,13 @@
+/**
+ * FlashClaw Configuration
+ * 
+ * 注意：路径相关的配置已统一到 paths.ts 中管理
+ * 请使用 paths.data(), paths.groups() 等函数获取路径
+ */
+
 import path from 'path';
-import os from 'os';
 import dotenv from 'dotenv';
+import { paths } from './paths.js';
 
 // Load environment variables from .env file
 dotenv.config();
@@ -13,30 +20,42 @@ export const BOT_NAME = process.env.BOT_NAME || 'FlashClaw';
 export const SCHEDULER_POLL_INTERVAL = 60000;
 export const IPC_POLL_INTERVAL = 1000;
 
-// ==================== Paths ====================
-const PROJECT_ROOT = process.cwd();
+// ==================== Paths (统一使用 paths.ts) ====================
+// Mount security: allowlist stored in config directory
+export const MOUNT_ALLOWLIST_PATH = path.join(paths.config(), 'mount-allowlist.json');
 
-function getHomeDir(): string {
-  return process.env.HOME || os.homedir() || '/home/user';
-}
-
-function getConfigDir(): string {
-  const IS_WINDOWS = process.platform === 'win32';
-  if (IS_WINDOWS) {
-    return path.join(process.env.APPDATA || path.join(getHomeDir(), 'AppData', 'Roaming'), 'flashclaw');
-  }
-  return path.join(getHomeDir(), '.config', 'flashclaw');
-}
-
-// Mount security: allowlist stored OUTSIDE project root
-export const MOUNT_ALLOWLIST_PATH = path.join(getConfigDir(), 'mount-allowlist.json');
-export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
-export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
-export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+// 主群组文件夹名称
 export const MAIN_GROUP_FOLDER = 'main';
+
+// 向后兼容：导出路径变量（建议直接使用 paths 模块）
+/** @deprecated 请使用 paths.groups() */
+export const GROUPS_DIR = paths.groups();
+/** @deprecated 请使用 paths.data() */
+export const DATA_DIR = paths.data();
 
 // ==================== Agent Configuration ====================
 export const AGENT_TIMEOUT = parseInt(process.env.AGENT_TIMEOUT || '300000', 10); // 5 minutes default
+
+// ==================== Scheduler Configuration ====================
+export const MAX_CONCURRENT_TASKS = parseInt(process.env.MAX_CONCURRENT_TASKS || '3', 10);
+export const DEFAULT_TASK_TIMEOUT_MS = parseInt(process.env.DEFAULT_TASK_TIMEOUT_MS || '300000', 10);
+export const RETRY_BASE_DELAY_MS = parseInt(process.env.RETRY_BASE_DELAY_MS || '60000', 10);
+export const MAX_RETRY_DELAY_MS = parseInt(process.env.MAX_RETRY_DELAY_MS || '3600000', 10);
+
+// ==================== Message Queue Configuration ====================
+export const MESSAGE_QUEUE_MAX_SIZE = parseInt(process.env.MESSAGE_QUEUE_MAX_SIZE || '100', 10);
+export const MESSAGE_QUEUE_MAX_CONCURRENT = parseInt(process.env.MESSAGE_QUEUE_MAX_CONCURRENT || '3', 10);
+export const MESSAGE_QUEUE_PROCESSING_TIMEOUT_MS = parseInt(process.env.MESSAGE_QUEUE_PROCESSING_TIMEOUT_MS || '300000', 10);
+export const MESSAGE_QUEUE_MAX_RETRIES = parseInt(process.env.MESSAGE_QUEUE_MAX_RETRIES || '2', 10);
+
+// ==================== Runtime Limits ====================
+export const HISTORY_CONTEXT_LIMIT = parseInt(process.env.HISTORY_CONTEXT_LIMIT || '500', 10);
+export const THINKING_THRESHOLD_MS = Number(process.env.THINKING_THRESHOLD_MS ?? 0);
+export const MAX_DIRECT_FETCH_CHARS = parseInt(process.env.MAX_DIRECT_FETCH_CHARS || '4000', 10);
+export const MAX_IPC_FILE_BYTES = parseInt(process.env.MAX_IPC_FILE_BYTES || String(1024 * 1024), 10);
+export const MAX_IPC_MESSAGE_CHARS = parseInt(process.env.MAX_IPC_MESSAGE_CHARS || '10000', 10);
+export const MAX_IPC_CHAT_ID_CHARS = parseInt(process.env.MAX_IPC_CHAT_ID_CHARS || '256', 10);
+export const MAX_IMAGE_BYTES = parseInt(process.env.MAX_IMAGE_BYTES || String(10 * 1024 * 1024), 10);
 
 // ==================== Timezone ====================
 // Timezone for scheduled tasks (cron expressions, etc.)
