@@ -62,6 +62,7 @@ export class MessageQueue<T> {
     this.processInterval = setInterval(() => {
       this.cleanupSeenMessages();
     }, 60000); // 每分钟清理一次
+    this.processInterval.unref();
     
     logger.info('Message queue started');
   }
@@ -148,10 +149,11 @@ export class MessageQueue<T> {
     const message = queue.shift()!;
     this.processing.add(chatId);
 
+    let timeoutId: NodeJS.Timeout | undefined;
     try {
       // 设置超时
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Processing timeout')), this.config.processingTimeout);
+        timeoutId = setTimeout(() => reject(new Error('Processing timeout')), this.config.processingTimeout);
       });
 
       await Promise.race([
@@ -175,6 +177,7 @@ export class MessageQueue<T> {
       }
 
     } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
       this.processing.delete(chatId);
 
       // 继续处理下一条

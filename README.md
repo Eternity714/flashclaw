@@ -24,8 +24,14 @@ npm install -g flashclaw
 ## 快速开始
 
 ```bash
+# 首次配置（交互式向导）
+flashclaw init
+
 # 启动服务
 flashclaw start
+
+# 检查运行环境
+flashclaw doctor
 ```
 
 ## 更新日志
@@ -39,6 +45,8 @@ flashclaw start
 |------|------|
 | `flashclaw` | 启动服务（默认） |
 | `flashclaw start` | 启动服务 |
+| `flashclaw init` | 交互式初始化配置 |
+| `flashclaw doctor` | 检查运行环境 |
 | `flashclaw version` | 显示版本 |
 | `flashclaw -v` / `flashclaw --version` | 显示版本（快捷方式） |
 | `flashclaw help` | 显示帮助 |
@@ -95,7 +103,7 @@ plugins/
 
 ## 配置
 
-配置文件位于 `~/.flashclaw/.env`（首次运行自动创建）。
+推荐使用 `flashclaw init` 交互式向导完成首次配置，也可以手动编辑配置文件 `~/.flashclaw/.env`（首次运行自动创建）。
 
 **特性：**
 - 支持环境变量替换：`${VAR}` 或 `${VAR:-default}`
@@ -151,6 +159,9 @@ flashclaw/
 ├── src/                      # 核心源码
 │   ├── index.ts             # 主入口、消息路由
 │   ├── cli.ts               # 命令行接口
+│   ├── commands/            # CLI 子命令
+│   │   ├── init.ts          # 交互式初始化向导
+│   │   └── doctor.ts        # 环境诊断
 │   ├── commands.ts          # 聊天命令处理
 │   ├── session-tracker.ts   # Token 用量追踪
 │   ├── paths.ts             # 路径管理

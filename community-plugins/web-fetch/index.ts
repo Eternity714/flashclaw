@@ -460,10 +460,6 @@ const plugin: ToolPlugin = {
         userAgent: {
           type: 'string',
           description: '自定义 User-Agent'
-        },
-        allowPrivate: {
-          type: 'boolean',
-          description: '允许访问内网地址（默认 false）'
         }
       },
       required: ['url']
@@ -528,7 +524,7 @@ const plugin: ToolPlugin = {
       return { success: false, error: 'maxRedirects 不合法' };
     }
 
-    const allowPrivate = input.allowPrivate ?? process.env.WEB_FETCH_ALLOW_PRIVATE === '1';
+    const allowPrivate = process.env.WEB_FETCH_ALLOW_PRIVATE === '1';
 
     try {
       const finalUrl = applyQuery(urlObj, input.query);

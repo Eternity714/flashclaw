@@ -918,7 +918,7 @@ class FeishuChannelPlugin implements ChannelPlugin {
       id: messageId,
       chatId,
       senderId: sender?.sender_id?.open_id || 'unknown',
-      senderName: sender?.sender_id?.open_id || 'Unknown',
+      senderName: sender?.sender_id?.open_id ? `user_${sender.sender_id.open_id.slice(-6)}` : 'Unknown',
       content: text || '[附件]',
       timestamp,
       chatType: chatType === 'p2p' ? 'p2p' : 'group',

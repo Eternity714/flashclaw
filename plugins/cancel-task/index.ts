@@ -4,7 +4,7 @@
  */
 
 import { ToolPlugin, ToolContext, ToolResult } from '../../src/plugins/types.js';
-import { getTaskById, updateTask, deleteTask, getTasksForGroup } from '../../src/db.js';
+import { getTaskById, updateTask, deleteTask } from '../../src/db.js';
 import { MAIN_GROUP_FOLDER } from '../../src/config.js';
 
 /**

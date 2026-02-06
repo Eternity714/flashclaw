@@ -4,9 +4,16 @@
 
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
+import { timingSafeEqual, createHash } from 'crypto';
 import { pagesRoutes } from './routes/pages.js';
 import { apiRoutes } from './routes/api.js';
 import { sseRoutes } from './routes/sse.js';
+
+function safeCompare(a: string, b: string): boolean {
+  const hashA = createHash('sha256').update(a).digest();
+  const hashB = createHash('sha256').update(b).digest();
+  return timingSafeEqual(hashA, hashB);
+}
 
 interface AppOptions {
   token?: string;
@@ -28,9 +35,9 @@ export function createApp(options: AppOptions = {}) {
       const queryToken = c.req.query('token');
 
       if (
-        authHeader === `Bearer ${options.token}` ||
-        cookieToken === options.token ||
-        queryToken === options.token
+        safeCompare(authHeader || '', `Bearer ${options.token}`) ||
+        safeCompare(cookieToken || '', options.token) ||
+        safeCompare(queryToken || '', options.token)
       ) {
         return next();
       }
@@ -67,7 +74,7 @@ export function createApp(options: AppOptions = {}) {
       if (c.req.path === '/login' && c.req.method === 'POST') {
         const body = await c.req.parseBody();
         if (body.token === options.token) {
-          c.header('Set-Cookie', `token=${options.token}; Path=/; HttpOnly; SameSite=Strict`);
+          c.header('Set-Cookie', `token=${encodeURIComponent(options.token)}; Path=/; HttpOnly; SameSite=Strict; Secure`);
           return c.redirect('/');
         }
         return c.redirect('/login?error=1');

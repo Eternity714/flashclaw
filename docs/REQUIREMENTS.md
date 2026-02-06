@@ -32,7 +32,7 @@ FlashClaw 是一个轻量级的个人 AI 助手。单个 Node.js 进程，乐高
 
 ### AI 原生开发
 
-我不需要安装向导 - Claude Code 指导安装。我不需要监控仪表板 - 我问 Claude Code 发生了什么。我不需要精心设计的日志 UI - 我让 Claude 读日志。我不需要调试工具 - 我描述问题，Claude 修复它。
+我可以通过 `flashclaw init` 向导快速配置，也可以手动编辑 `.env` 文件。我不需要监控仪表板 - 我问 Claude Code 发生了什么。我不需要精心设计的日志 UI - 我让 Claude 读日志。我不需要调试工具 - 我描述问题，Claude 修复它。
 
 ---
 
@@ -190,7 +190,8 @@ FlashClaw 自动检测 AI 模型的能力：
 
 ### 配置
 
-在 `~/.flashclaw/.env` 中配置 API 密钥和平台凭证（首次运行自动创建）。
+1. 运行 `flashclaw init` 交互式向导，按提示完成配置
+2. 或手动在 `~/.flashclaw/.env` 中配置 API 密钥和平台凭证（首次运行自动创建）
 
 ### 添加新功能
 

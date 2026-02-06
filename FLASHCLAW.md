@@ -16,6 +16,9 @@ flashclaw/
 ├── src/
 │   ├── index.ts           # 主入口、消息路由
 │   ├── cli.ts             # CLI 命令行工具
+│   ├── commands/          # CLI 子命令
+│   │   ├── init.ts        # 交互式初始化向导
+│   │   └── doctor.ts      # 环境诊断
 │   ├── agent-runner.ts    # AI Agent 运行器
 │   ├── config.ts          # 配置常量
 │   ├── types.ts           # 核心类型定义
@@ -368,6 +371,9 @@ npm run typecheck    # 类型检查
 # CLI
 flashclaw                          # 启动服务（默认）
 flashclaw start                    # 启动服务
+flashclaw init                     # 交互式初始化配置
+flashclaw init --non-interactive --api-key sk-xxx  # 非交互式初始化
+flashclaw doctor                   # 环境诊断
 flashclaw version                  # 显示版本
 flashclaw help                     # 显示帮助
 flashclaw plugins list             # 列出已安装插件

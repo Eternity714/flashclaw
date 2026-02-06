@@ -30,10 +30,12 @@ cd flashclaw
 # 安装依赖
 npm install
 
-# 复制配置文件
-cp .env.example .env
+# 方式一：交互式配置（推荐）
+npx tsx src/cli.ts init
 
-# 编辑 .env 添加你的配置
+# 方式二：手动配置
+cp .env.example ~/.flashclaw/.env
+# 编辑 .env 填入你的 API Key
 ```
 
 ### 运行
@@ -49,6 +51,8 @@ npm run build
 npm run typecheck
 
 # 使用 CLI
+npx tsx src/cli.ts init      # 交互式初始化
+npx tsx src/cli.ts doctor    # 环境诊断
 npm run cli -- status
 ```
 
@@ -74,6 +78,10 @@ flashclaw/
 │   │   ├── memory.ts         # 记忆管理
 │   │   └── model-capabilities.ts  # 模型能力检测
 │   │
+│   ├── commands/             # CLI 子命令
+│   │   ├── init.ts           # 交互式初始化向导
+│   │   └── doctor.ts         # 环境诊断
+│   │
 │   └── plugins/              # 插件系统
 │       ├── index.ts          # 插件系统入口
 │       ├── manager.ts        # 插件管理器
@@ -82,7 +90,6 @@ flashclaw/
 │
 ├── plugins/                   # 插件目录
 │   ├── feishu/               # 飞书渠道插件
-│   ├── dingtalk/             # 钉钉渠道插件
 │   ├── send-message/         # 发送消息工具
 │   ├── schedule-task/        # 创建定时任务
 │   ├── list-tasks/           # 列出定时任务

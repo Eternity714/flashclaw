@@ -90,6 +90,7 @@
 | AI 调用 | 直接 API 调用 | 支持 Anthropic 及兼容 API |
 | 运行时 | Node.js 20+ | 主进程，路由、调度、代理执行 |
 | CLI | Commander.js | 命令行工具 |
+| 交互式 CLI | @clack/prompts | 交互式 CLI 框架 |
 
 ---
 
@@ -126,6 +127,10 @@ flashclaw/
 │   │   ├── api-client.ts          # AI API 客户端
 │   │   ├── memory.ts              # 记忆管理
 │   │   └── model-capabilities.ts  # 模型能力检测
+│   │
+│   ├── commands/                   # CLI 子命令
+│   │   ├── init.ts                # 交互式初始化向导
+│   │   └── doctor.ts              # 环境诊断
 │   │
 │   └── plugins/                   # 插件系统
 │       ├── index.ts               # 插件系统入口
@@ -451,6 +456,8 @@ FlashClaw 提供 CLI 工具管理服务和插件。
 ```
 flashclaw
 ├── start                      # 启动服务（默认命令）
+├── init                       # 交互式初始化
+├── doctor                     # 环境诊断
 ├── version                    # 显示版本
 ├── help                       # 显示帮助
 ├── plugins

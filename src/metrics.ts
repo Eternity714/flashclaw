@@ -15,11 +15,8 @@ interface GaugeValue {
   labels: Record<string, string>;
 }
 
-interface HistogramValue {
-  sum: number;
-  count: number;
-  buckets: Map<number, number>;
-  labels: Record<string, string>;
+function stableLabelKey(labels: Record<string, string>): string {
+  return Object.keys(labels).sort().map(k => `${k}=${labels[k]}`).join(',');
 }
 
 class Counter {
@@ -31,9 +28,8 @@ class Counter {
   ) {}
   
   inc(labels: Record<string, string> = {}, value: number = 1): void {
-    const existing = this.values.find(v => 
-      JSON.stringify(v.labels) === JSON.stringify(labels)
-    );
+    const key = stableLabelKey(labels);
+    const existing = this.values.find(v => stableLabelKey(v.labels) === key);
     if (existing) {
       existing.value += value;
     } else {
@@ -55,9 +51,8 @@ class Gauge {
   ) {}
   
   set(value: number, labels: Record<string, string> = {}): void {
-    const existing = this.values.find(v => 
-      JSON.stringify(v.labels) === JSON.stringify(labels)
-    );
+    const key = stableLabelKey(labels);
+    const existing = this.values.find(v => stableLabelKey(v.labels) === key);
     if (existing) {
       existing.value = value;
     } else {
@@ -66,9 +61,8 @@ class Gauge {
   }
   
   inc(labels: Record<string, string> = {}, value: number = 1): void {
-    const existing = this.values.find(v => 
-      JSON.stringify(v.labels) === JSON.stringify(labels)
-    );
+    const key = stableLabelKey(labels);
+    const existing = this.values.find(v => stableLabelKey(v.labels) === key);
     if (existing) {
       existing.value += value;
     } else {
@@ -106,7 +100,7 @@ export function getMetricsOutput(): string {
   metrics.uptime.set(Math.floor((Date.now() - startTime) / 1000));
   
   // Counter 指标
-  for (const [key, counter] of Object.entries(metrics)) {
+  for (const [_, counter] of Object.entries(metrics)) {
     if (counter instanceof Counter) {
       lines.push(`# HELP ${counter.name} ${counter.help}`);
       lines.push(`# TYPE ${counter.name} counter`);
@@ -120,7 +114,7 @@ export function getMetricsOutput(): string {
   }
   
   // Gauge 指标
-  for (const [key, gauge] of Object.entries(metrics)) {
+  for (const [_, gauge] of Object.entries(metrics)) {
     if (gauge instanceof Gauge) {
       lines.push(`# HELP ${gauge.name} ${gauge.help}`);
       lines.push(`# TYPE ${gauge.name} gauge`);

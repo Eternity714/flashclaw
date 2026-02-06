@@ -1,5 +1,5 @@
 {
-  "name": "resume_task",
+  "name": "resume-task",
   "version": "1.0.0",
   "description": "恢复已暂停的定时任务",
   "type": "tool",

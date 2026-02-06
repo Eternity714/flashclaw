@@ -2,7 +2,7 @@
  * 插件管理服务
  */
 
-import { existsSync, readFileSync, writeFileSync, readdirSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -72,6 +72,7 @@ function getPluginsConfig(): PluginsConfig {
  */
 function savePluginsConfig(config: PluginsConfig): void {
   const configFile = paths.pluginsConfig();
+  mkdirSync(dirname(configFile), { recursive: true });
   writeFileSync(configFile, JSON.stringify(config, null, 2));
 }
 

@@ -187,7 +187,7 @@ export class ApiClient {
     this.client = new Anthropic({
       apiKey: config.apiKey,
       baseURL: config.baseURL,
-      maxRetries: config.maxRetries ?? 3,
+      maxRetries: 0,  // 禁用 SDK 重试，由 chat() 方法统一处理
       timeout: config.timeout ?? 60000,
     });
     this.model = config.model || 'claude-sonnet-4-20250514';
@@ -315,37 +315,74 @@ export class ApiClient {
     // 处理流式响应
     let finalMessage: Anthropic.Message | null = null;
     
+    // 追踪所有 content blocks（text 和 tool_use），从流式事件中组装完整消息
+    const contentBlocks: Array<Anthropic.TextBlock | Anthropic.ToolUseBlock> = [];
+    const partialJsonParts = new Map<number, string[]>();
+    
     for await (const event of stream as AsyncIterable<Anthropic.MessageStreamEvent>) {
-      if (event.type === 'content_block_delta') {
-        const delta = event.delta;
-        if ('text' in delta) {
-          yield { type: 'text', text: delta.text };
-        } else if ('partial_json' in delta) {
-          // 工具调用的部分 JSON，暂时跳过
-        }
-      } else if (event.type === 'content_block_start') {
-        const block = event.content_block;
-        if (block.type === 'tool_use') {
-          // 工具调用开始，等待完整输入
-        }
-      } else if (event.type === 'message_stop') {
-        // 消息结束
-      } else if (event.type === 'message_delta') {
-        // 消息元数据更新
-      }
-      
-      // 保存最终消息
       if (event.type === 'message_start') {
         finalMessage = event.message as Anthropic.Message;
+      } else if (event.type === 'content_block_start') {
+        const block = event.content_block;
+        if (block.type === 'text') {
+          contentBlocks[event.index] = { type: 'text' as const, text: '', citations: null };
+        } else if (block.type === 'tool_use') {
+          contentBlocks[event.index] = {
+            type: 'tool_use' as const,
+            id: block.id,
+            name: block.name,
+            input: {},
+          };
+          partialJsonParts.set(event.index, []);
+        }
+      } else if (event.type === 'content_block_delta') {
+        const delta = event.delta;
+        if ('text' in delta) {
+          // 累积文本内容并实时输出
+          const block = contentBlocks[event.index];
+          if (block?.type === 'text') {
+            block.text += delta.text;
+          }
+          yield { type: 'text', text: delta.text };
+        } else if ('partial_json' in delta) {
+          // 累积工具调用的 JSON 片段
+          const parts = partialJsonParts.get(event.index);
+          if (parts) {
+            parts.push(delta.partial_json);
+          }
+        }
+      } else if (event.type === 'content_block_stop') {
+        // tool_use block 完成后，从累积的片段解析完整 JSON
+        const block = contentBlocks[event.index];
+        if (block?.type === 'tool_use') {
+          const parts = partialJsonParts.get(event.index);
+          if (parts && parts.length > 0) {
+            try {
+              block.input = JSON.parse(parts.join(''));
+            } catch {
+              block.input = {};
+            }
+          }
+        }
+      } else if (event.type === 'message_delta') {
+        // 更新 stop_reason 和 usage
+        if (finalMessage) {
+          finalMessage.stop_reason = event.delta.stop_reason ?? finalMessage.stop_reason;
+          if (event.usage) {
+            finalMessage.usage.output_tokens = event.usage.output_tokens;
+          }
+        }
       }
     }
     
-    // 重新获取完整消息以获取工具调用
+    // 从收集的流式数据组装完整消息（无需再发 API 请求）
     if (finalMessage) {
-      const fullResponse = await this.chat(messages, { ...options, maxTokens: options?.maxTokens ?? 4096 });
+      finalMessage.content = contentBlocks.filter(
+        (block): block is Anthropic.TextBlock | Anthropic.ToolUseBlock => block != null
+      );
       
-      // 检查工具调用
-      for (const block of fullResponse.content) {
+      // 发出 tool_use 事件
+      for (const block of finalMessage.content) {
         if (block.type === 'tool_use') {
           yield {
             type: 'tool_use',
@@ -356,7 +393,7 @@ export class ApiClient {
         }
       }
       
-      yield { type: 'done', message: fullResponse };
+      yield { type: 'done', message: finalMessage };
     }
   }
   
@@ -392,6 +429,24 @@ export class ApiClient {
     executeTool: ToolExecutor,
     options?: ChatOptions
   ): Promise<string> {
+    // 将 ChatMessage[] 转换为 Anthropic.MessageParam[] 后调用内部方法
+    const apiMessages: Anthropic.MessageParam[] = messages.map(msg => ({
+      role: msg.role as 'user' | 'assistant',
+      content: msg.content,
+    }));
+    return this.handleToolUseInternal(response, apiMessages, executeTool, options);
+  }
+  
+  /**
+   * 内部工具调用处理（保持完整的 Anthropic.MessageParam[] 格式）
+   * 递归时不需要格式转换，保持 tool_use 和 tool_result 的完整结构
+   */
+  private async handleToolUseInternal(
+    response: Anthropic.Message,
+    messages: Anthropic.MessageParam[],
+    executeTool: ToolExecutor,
+    options?: ChatOptions
+  ): Promise<string> {
     // 检查是否有工具调用
     const toolUseBlocks = response.content.filter(
       (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use'
@@ -402,13 +457,9 @@ export class ApiClient {
       return this.extractText(response);
     }
     
-    // 构建新的消息序列
+    // 在已有消息基础上追加 assistant 回复（包含完整的 tool_use blocks）
     const newMessages: Anthropic.MessageParam[] = [
-      ...messages.map(msg => ({
-        role: msg.role as 'user' | 'assistant',
-        content: msg.content,
-      })),
-      // 添加 assistant 的回复（包含工具调用）
+      ...messages,
       {
         role: 'assistant' as const,
         content: response.content,
@@ -437,7 +488,7 @@ export class ApiClient {
       }
     }
     
-    // 添加工具结果
+    // 添加工具结果（完整的 tool_result blocks）
     newMessages.push({
       role: 'user',
       content: toolResults,
@@ -460,15 +511,9 @@ export class ApiClient {
     
     const nextResponse = await this.client.messages.create(params);
     
-    // 递归处理，以支持多轮工具调用
+    // 递归处理多轮工具调用，保持完整消息结构
     if (nextResponse.stop_reason === 'tool_use') {
-      // 将新消息转换回 ChatMessage 格式继续处理
-      const updatedMessages: ChatMessage[] = [
-        ...messages,
-        { role: 'assistant', content: this.extractText(response) },
-        { role: 'user', content: toolResults.map(r => r.content).join('\n') },
-      ];
-      return this.handleToolUse(nextResponse, updatedMessages, executeTool, options);
+      return this.handleToolUseInternal(nextResponse, newMessages, executeTool, options);
     }
     
     return this.extractText(nextResponse);
@@ -637,8 +682,8 @@ export function createApiClient(): ApiClient | null {
     apiKey,
     baseURL: process.env.ANTHROPIC_BASE_URL,
     model: process.env.AI_MODEL || process.env.ANTHROPIC_MODEL,
-    maxRetries: process.env.API_MAX_RETRIES ? parseInt(process.env.API_MAX_RETRIES) : undefined,
-    timeout: process.env.API_TIMEOUT ? parseInt(process.env.API_TIMEOUT) : undefined,
+    maxRetries: process.env.API_MAX_RETRIES ? (parseInt(process.env.API_MAX_RETRIES, 10) || undefined) : undefined,
+    timeout: process.env.API_TIMEOUT ? (parseInt(process.env.API_TIMEOUT, 10) || undefined) : undefined,
   });
 }
 

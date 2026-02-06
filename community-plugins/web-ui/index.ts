@@ -22,23 +22,20 @@ let config = {
  * 打开浏览器（跨平台）
  */
 async function openBrowser(url: string): Promise<void> {
-  const { exec } = await import('child_process');
+  const { spawn } = await import('child_process');
   const platform = process.platform;
-  
-  let command: string;
-  if (platform === 'win32') {
-    command = `start "" "${url}"`;
-  } else if (platform === 'darwin') {
-    command = `open "${url}"`;
-  } else {
-    command = `xdg-open "${url}"`;
-  }
-  
-  exec(command, (err) => {
-    if (err) {
-      console.log(`⚡ Web UI: 无法自动打开浏览器，请手动访问 ${url}`);
+
+  try {
+    if (platform === 'win32') {
+      spawn('cmd', ['/c', 'start', '', url], { stdio: 'ignore', detached: true }).unref();
+    } else if (platform === 'darwin') {
+      spawn('open', [url], { stdio: 'ignore', detached: true }).unref();
+    } else {
+      spawn('xdg-open', [url], { stdio: 'ignore', detached: true }).unref();
     }
-  });
+  } catch {
+    console.log(`⚡ Web UI: 无法自动打开浏览器，请手动访问 ${url}`);
+  }
 }
 
 // 工具 Schema
@@ -107,7 +104,9 @@ const plugin: ToolPlugin = {
 
   async cleanup(): Promise<void> {
     if (server) {
-      server.close();
+      await new Promise<void>((resolve, reject) => {
+        server!.close((err?: Error) => err ? reject(err) : resolve());
+      });
       server = null;
       serverUrl = null;
       console.log('⚡ Web UI 已停止');

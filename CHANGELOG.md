@@ -4,6 +4,36 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)，
 并遵循 [语义化版本](https://semver.org/spec/v2.0.0.html)。
 
+## [1.2.0] - 2026-02-06
+
+### 新增
+- `flashclaw init` 交互式初始化向导（支持交互式和非交互式模式）
+- `flashclaw doctor` 环境诊断命令（检查 10 个维度）
+- 启动时 API Key 配置校验和友好提示
+- 首次安装后 postinstall 引导信息
+- 新增 `@clack/prompts` 依赖
+
+### 修复
+- api-client: 修复 chatStream 双倍 API 调用问题（节省 50% API 费用）
+- api-client: 修复 handleToolUse 递归调用破坏消息结构
+- api-client: 修复 SDK 与手动双重重试（最多 9 次降为 3 次）
+- message-queue: 修复超时 Promise 泄漏导致 unhandledRejection
+- rate-limiter: 修复 refillRate=0 时无限循环
+- session-tracker: 修复损坏时间戳导致会话永不清理
+- metrics: 修复 label 匹配依赖 JSON 序列化顺序问题
+- memory: 修复 generateSummary 对数组内容输出 [object Object]
+- hello-world: 完全重写使其符合 ToolPlugin 接口规范
+- memory 插件: 修复 scope 默认值与文档矛盾（改为 group）
+- 三个 plugin.json name 字段与目录名不一致（改为 kebab-case）
+
+### 安全
+- web-ui: 修复 openBrowser 命令注入漏洞（exec 改为 spawn）
+- web-ui: Token 认证改用 crypto.timingSafeEqual 防御时序攻击
+- web-ui: Cookie 添加 Secure 标志和 encodeURIComponent
+- web-ui: cleanup() 等待 server.close() 完成
+- web-fetch: 移除 allowPrivate 参数防止 AI 绕过 SSRF 防护
+- web-ui: savePluginsConfig 添加 mkdirSync 防止 ENOENT
+
 ## [1.1.0] - 2026-02-05
 
 ### 新增

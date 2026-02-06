@@ -1,5 +1,5 @@
 {
-  "name": "register_group",
+  "name": "register-group",
   "version": "1.0.0",
   "type": "tool",
   "description": "注册新的聊天群组",

@@ -94,6 +94,9 @@ ${bold('命令:')}
   ${cyan('plugins uninstall <name>')}    卸载插件
   ${cyan('plugins update <name>')}       更新插件
   ${cyan('plugins update --all')}        更新所有插件
+  ${cyan('init')}                         交互式初始化配置
+  ${cyan('init --non-interactive')}      非交互式初始化（需 --api-key）
+  ${cyan('doctor')}                      检查运行环境
   ${cyan('config list-backups')}         列出配置备份
   ${cyan('config restore [n]')}          恢复配置备份（n=1-5，默认1）
   ${cyan('version')}                     显示版本
@@ -101,11 +104,11 @@ ${bold('命令:')}
 
 ${bold('示例:')}
   flashclaw                     启动服务（默认）
+  flashclaw init                首次配置
+  flashclaw doctor              环境诊断
   flashclaw start               启动服务
   flashclaw plugins list        查看已安装插件
   flashclaw plugins install feishu  安装飞书插件
-  flashclaw config restore      恢复最新备份
-  flashclaw config restore 2    恢复第2个备份
 
 ${bold('更多信息:')}
   文档: https://github.com/GuLu9527/flashclaw
@@ -438,6 +441,35 @@ async function main(): Promise<void> {
       // 默认启动服务
       await startService();
       break;
+
+    case 'init': {
+      // 交互式初始化向导
+      const { initCommand } = await import('./commands/init.js');
+      // 将 flags 转换为支持字符串值（处理 --api-key=xxx 形式的参数）
+      const initFlags: Record<string, string | boolean> = { ...flags };
+      // 从原始 argv 中提取 --api-key, --base-url, --model, --bot-name 的值
+      const rawArgs = process.argv.slice(2);
+      for (let i = 0; i < rawArgs.length; i++) {
+        const arg = rawArgs[i];
+        if (arg.includes('=')) {
+          const [key, ...rest] = arg.replace(/^--/, '').split('=');
+          initFlags[key] = rest.join('=');
+        } else if (arg.startsWith('--') && i + 1 < rawArgs.length && !rawArgs[i + 1].startsWith('-')) {
+          const key = arg.slice(2);
+          if (['api-key', 'base-url', 'model', 'bot-name'].includes(key)) {
+            initFlags[key] = rawArgs[i + 1];
+          }
+        }
+      }
+      await initCommand(initFlags);
+      break;
+    }
+
+    case 'doctor': {
+      const { doctorCommand } = await import('./commands/doctor.js');
+      await doctorCommand();
+      break;
+    }
       
     case 'plugins':
       await handlePluginsCommand(subcommand, args, flags);

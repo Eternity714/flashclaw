@@ -1314,6 +1314,29 @@ function displayBanner(enabledPlatforms: string[], groupCount: number): void {
 export async function main(): Promise<void> {
   // 确保所有必要目录存在
   ensureDirectories();
+
+  // 启动时配置校验：检查 API Key 是否已配置
+  const hasApiKey = !!(process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY);
+  if (!hasApiKey) {
+    const envPath = paths.env();
+    const { existsSync } = await import('fs');
+    const envExists = existsSync(envPath);
+
+    console.log(`
+\x1b[33m⚠  API Key 未配置\x1b[0m
+
+FlashClaw 需要 Anthropic API Key 才能与 AI 通信。
+
+${envExists 
+  ? `请编辑配置文件添加 API Key:\n  \x1b[36m${envPath}\x1b[0m\n\n  设置 ANTHROPIC_AUTH_TOKEN=sk-xxx`
+  : `请先运行初始化向导:\n  \x1b[36mflashclaw init\x1b[0m`
+}
+
+或通过环境变量设置:
+  \x1b[36mexport ANTHROPIC_AUTH_TOKEN=sk-xxx\x1b[0m
+`);
+    logger.warn('API Key 未配置，AI 功能将不可用。机器人可以启动但无法回复消息。');
+  }
   
   // 初始化 API 客户端（全局单例）
   apiClient = getApiClient();

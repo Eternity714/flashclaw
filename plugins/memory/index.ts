@@ -63,10 +63,10 @@ const plugin: ToolPlugin = {
   },
   
   async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
-    const { action, key, value, scope = 'user' } = params as MemoryParams;
+    const { action, key, value, scope = 'group' } = params as MemoryParams;
     const mm = getMemoryManager();
     
-    // 默认使用用户级别记忆（跨会话共享）
+    // 默认使用会话级别记忆（仅当前会话有效）
     const isUserScope = scope === 'user';
     const scopeLabel = isUserScope ? '用户' : '会话';
     

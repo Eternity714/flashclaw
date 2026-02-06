@@ -8,8 +8,18 @@
 ### Added
 
 ### Changed
+- hello-world 插件完全重写，符合 ToolPlugin 接口规范
+- memory 插件 scope 默认值改为 group
+- pause-task/resume-task/register-group plugin.json name 改为 kebab-case
+- cancel-task 移除未使用的 getTasksForGroup 导入
+- feishu senderName 不再暴露完整 open_id
 
 ### Fixed
+
+### Security
+- web-ui openBrowser 命令注入修复
+- web-ui Token 时序攻击修复
+- web-fetch allowPrivate 参数从 schema 移除
 
 ### Removed
 

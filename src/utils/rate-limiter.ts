@@ -15,6 +15,9 @@ export class RateLimiter {
   } = {}) {
     this.maxTokens = options.maxTokens ?? 60;
     this.refillRate = options.refillRate ?? 1;
+    if (this.refillRate <= 0) {
+      throw new Error('refillRate must be positive');
+    }
     this.tokens = this.maxTokens;
     this.lastRefill = Date.now();
   }

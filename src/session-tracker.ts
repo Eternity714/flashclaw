@@ -275,7 +275,7 @@ export function cleanupStaleSessions(maxAgeMs: number = 24 * 60 * 60 * 1000): nu
   
   for (const [chatId, session] of sessions) {
     const lastActivity = new Date(session.lastActivityAt).getTime();
-    if (now - lastActivity > maxAgeMs) {
+    if (isNaN(lastActivity) || now - lastActivity > maxAgeMs) {
       sessions.delete(chatId);
       cleaned++;
     }

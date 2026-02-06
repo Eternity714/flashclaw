@@ -11,7 +11,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { ApiClient, ChatMessage } from './api-client.js';
+import type { ApiClient, ChatMessage, MessageContent, TextBlock } from './api-client.js';
 import { createLogger } from '../logger.js';
 
 const logger = createLogger('MemoryManager');
@@ -25,6 +25,14 @@ function countCjkChars(text: string): number {
     }
   }
   return count;
+}
+
+function extractTextContent(content: MessageContent): string {
+  if (typeof content === 'string') return content;
+  return content
+    .filter((block): block is TextBlock => block.type === 'text')
+    .map(block => block.text)
+    .join('');
 }
 
 // ==================== 类型定义 ====================
@@ -613,7 +621,7 @@ export class MemoryManager {
   ): Promise<string> {
     // 格式化消息为文本
     const conversationText = messages
-      .map(msg => `${msg.role === 'user' ? '用户' : '助手'}: ${msg.content}`)
+      .map(msg => `${msg.role === 'user' ? '用户' : '助手'}: ${extractTextContent(msg.content)}`)
       .join('\n\n');
     
     // 使用 AI 生成摘要

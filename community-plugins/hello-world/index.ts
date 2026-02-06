@@ -3,19 +3,24 @@
  * 用于验证 FlashClaw 插件安装功能
  */
 
-import type { ToolPlugin, ToolContext, ToolResult } from 'flashclaw';
+import type { ToolPlugin, ToolContext, ToolResult } from '../../src/plugins/types.js';
+
+const greetings: Record<string, (name: string) => string> = {
+  zh: (name) => `你好，${name}！欢迎使用 FlashClaw ⚡`,
+  en: (name) => `Hello, ${name}! Welcome to FlashClaw ⚡`,
+  ja: (name) => `こんにちは、${name}さん！FlashClaw へようこそ ⚡`,
+};
 
 const plugin: ToolPlugin = {
   name: 'hello-world',
   version: '1.0.0',
   description: '测试插件 - 向用户打招呼',
-  type: 'tool',
 
   tools: [
     {
       name: 'say_hello',
       description: '向指定的人打招呼',
-      parameters: {
+      input_schema: {
         type: 'object',
         properties: {
           name: {
@@ -26,42 +31,33 @@ const plugin: ToolPlugin = {
             type: 'string',
             enum: ['zh', 'en', 'ja'],
             description: '语言：zh=中文, en=英文, ja=日文',
-            default: 'zh',
           },
         },
         required: ['name'],
       },
-
-      async execute(
-        params: { name: string; language?: string },
-        context: ToolContext
-      ): Promise<ToolResult> {
-        const { name, language = 'zh' } = params;
-
-        const greetings: Record<string, string> = {
-          zh: `你好，${name}！欢迎使用 FlashClaw ⚡`,
-          en: `Hello, ${name}! Welcome to FlashClaw ⚡`,
-          ja: `こんにちは、${name}さん！FlashClaw へようこそ ⚡`,
-        };
-
-        const message = greetings[language] || greetings['zh'];
-
-        return {
-          success: true,
-          data: { message, name, language },
-          message,
-        };
-      },
     },
   ],
 
-  // 插件加载时调用
-  async onLoad() {
+  async init() {
     console.log('[hello-world] 插件已加载');
   },
 
-  // 插件卸载时调用
-  async onUnload() {
+  async execute(toolName: string, params: unknown, context: ToolContext): Promise<ToolResult> {
+    if (toolName !== 'say_hello') {
+      return { success: false, error: `未知工具: ${toolName}` };
+    }
+
+    const { name, language = 'zh' } = params as { name: string; language?: string };
+    const greetFn = greetings[language] || greetings['zh'];
+    const message = greetFn(name);
+
+    return {
+      success: true,
+      data: { message, name, language },
+    };
+  },
+
+  async cleanup() {
     console.log('[hello-world] 插件已卸载');
   },
 };

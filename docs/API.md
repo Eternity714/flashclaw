@@ -740,6 +740,25 @@ function getCurrentModelId(): string;
 
 ---
 
+## CLI 命令 API
+
+### initCommand(flags)
+
+交互式初始化向导。
+
+**参数：**
+- `flags.non-interactive` (boolean) - 非交互式模式
+- `flags.api-key` (string) - API Key（非交互式必需）
+- `flags.base-url` (string) - API Base URL（可选）
+- `flags.model` (string) - AI 模型名称（可选）
+- `flags.bot-name` (string) - 机器人名称（可选）
+
+### doctorCommand()
+
+环境诊断，检查 Node.js 版本、配置文件、API 连通性等 10 项内容。
+
+---
+
 ## 错误处理
 
 ### 可重试错误

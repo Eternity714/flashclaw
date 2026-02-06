@@ -1,5 +1,5 @@
 {
-  "name": "pause_task",
+  "name": "pause-task",
   "version": "1.0.0",
   "description": "暂停定时任务",
   "type": "tool",

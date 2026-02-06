@@ -8,6 +8,7 @@
 - 更新 `CHANGELOG.md`
 - 更新 `docs/PLUGINS_CHANGELOG.md`（如有插件变更）
 - 确认 `package.json` 版本号正确
+- 运行 `flashclaw doctor` 确认环境正常
 - 验证 `README.md` 中的说明与当前行为一致
 
 ## 发布步骤
