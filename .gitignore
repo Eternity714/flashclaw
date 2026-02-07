@@ -20,6 +20,8 @@ logs/
 .idea/
 .vscode/
 .cursor/
+.trae/
+.opencode/
 
 agents-sdk-docs
 
